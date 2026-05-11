@@ -10,10 +10,18 @@ const { createClaudeCodeRuntimeAdapter } = require("../adapters/runtime/claudeco
 const { findModelByQuery } = require("../adapters/runtime/codex/model-catalog");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const {
-  STICKER_DESC_GUIDANCE,
-  STICKER_TAG_GUIDANCE,
-} = require("../services/sticker-service");
-const { buildWeixinHelpText } = require("./command-registry");
+  assembleRuntimeTurnText,
+  buildInboundDraft,
+  buildMergedInboundPrepared,
+  clonePreparedInboundMessage,
+  isPlainTextPreparedMessage,
+  shouldBatchImageOnlyInbound,
+  takeImageOnlyBatchMessages,
+} = require("./inbound-turn");
+const { resolveVisionContext } = require("../services/vision-context");
+const {
+  buildWeixinHelpText,
+} = require("./command-registry");
 const { CheckinConfigStore, parseCheckinRangeMinutes, resolveDefaultCheckinRange } = require("./checkin-config-store");
 const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("./default-targets");
 const { StreamDelivery } = require("./stream-delivery");
@@ -40,8 +48,6 @@ const SESSION_EXPIRED_ERRCODE = -14;
 const RETRY_DELAY_MS = 2_000;
 const BACKOFF_DELAY_MS = 30_000;
 const MAX_CONSECUTIVE_FAILURES = 3;
-const FIRST_RUNTIME_EVENT_NOTICE_TIMEOUT_MS = 8_000;
-const FIRST_RUNTIME_EVENT_FAILURE_TIMEOUT_MS = 45_000;
 const MAX_INBOUND_STICKER_IMAGE_BATCH = 10;
 const INBOUND_IMAGE_BATCH_IDLE_MS = 1_500;
 
@@ -81,11 +87,9 @@ class CyberbossApp {
       sessionStore: this.runtimeAdapter.getSessionStore(),
       onDeferredSystemReply: (payload) => this.deferSystemReply(payload),
     });
-    this.pendingRuntimeEventWatchdogs = new Map();
     this.pendingOperationByRunKey = new Map();
     this.runtimeEventChain = Promise.resolve();
     this.runtimeAdapter.onEvent((event) => {
-      this.clearRuntimeEventWatchdog(event?.payload?.threadId);
       this.threadStateStore.applyRuntimeEvent(event);
       this.runtimeEventChain = this.runtimeEventChain
         .catch(() => {})
@@ -429,11 +433,17 @@ class CyberbossApp {
     }).catch(() => {});
 
     try {
-      const turn = await this.runtimeAdapter.sendTextTurn({
+      const model = this.runtimeAdapter.getSessionStore().getRuntimeParamsForWorkspace(bindingKey, workspaceRoot).model;
+      const runtimeTurn = await this.buildRuntimeTurn({ prepared, model });
+      const sendTurn = typeof this.runtimeAdapter.sendTurn === "function"
+        ? this.runtimeAdapter.sendTurn.bind(this.runtimeAdapter)
+        : this.runtimeAdapter.sendTextTurn.bind(this.runtimeAdapter);
+      const turn = await sendTurn({
         bindingKey,
         workspaceRoot,
-        text: prepared.text,
-        model: this.runtimeAdapter.getSessionStore().getRuntimeParamsForWorkspace(bindingKey, workspaceRoot).model,
+        text: runtimeTurn.text,
+        attachments: runtimeTurn.attachments,
+        model,
         metadata: {
           workspaceId: prepared.workspaceId,
           accountId: prepared.accountId,
@@ -463,12 +473,6 @@ class CyberbossApp {
       } else {
         this.streamDelivery.queueReplyTargetForThread(turn.threadId, replyTarget);
       }
-      this.scheduleRuntimeEventWatchdog({
-        bindingKey,
-        workspaceRoot,
-        normalized: prepared,
-        threadId: turn.threadId,
-      });
       return true;
     } catch (error) {
       this.turnGateStore.releaseScope(bindingKey, workspaceRoot);
@@ -480,6 +484,30 @@ class CyberbossApp {
       }).catch(() => {});
       return false;
     }
+  }
+
+  async buildRuntimeTurn({ prepared, model = "" }) {
+    if (prepared?.provider === "system") {
+      return {
+        text: String(prepared.text || "").trim(),
+        attachments: [],
+      };
+    }
+    const visionContext = await resolveVisionContext({
+      prepared,
+      config: this.config,
+      runtimeAdapter: this.runtimeAdapter,
+      model,
+    });
+    return {
+      text: assembleRuntimeTurnText({
+        prepared,
+        config: this.config,
+        visionContext,
+      }),
+      attachments: Array.isArray(visionContext.runtimeAttachments) ? visionContext.runtimeAttachments : [],
+      visionContext,
+    };
   }
 
   async routePreparedInbound({ bindingKey, workspaceRoot, prepared }) {
@@ -590,8 +618,6 @@ class CyberbossApp {
       workspaceRoot: draft.workspaceRoot,
       messages: batchMessages,
       trailingPrepared,
-      config: this.config,
-      runtimeId: this.runtimeAdapter?.describe?.().id || "",
     });
     await this.routePreparedInbound({
       bindingKey: draft.bindingKey,
@@ -712,8 +738,6 @@ class CyberbossApp {
           bindingKey: draft.bindingKey,
           workspaceRoot: draft.workspaceRoot,
           messages: batchMessages,
-          config: this.config,
-          runtimeId: this.runtimeAdapter?.describe?.().id || "",
         }),
         remainingMessages,
       };
@@ -751,110 +775,6 @@ class CyberbossApp {
     };
   }
 
-  scheduleRuntimeEventWatchdog({ bindingKey, workspaceRoot, normalized, threadId = "" }) {
-    const sessionStore = this.runtimeAdapter.getSessionStore();
-    const candidateThreadId = normalizeCommandArgument(threadId)
-      || sessionStore.getThreadIdForWorkspace(bindingKey, workspaceRoot);
-    const normalizedThreadId = normalizeCommandArgument(candidateThreadId);
-    if (!normalizedThreadId) {
-      return;
-    }
-
-    const runtimeName = this.runtimeAdapter.describe().id || "runtime";
-    const isCodex = runtimeName === "codex";
-
-    this.clearRuntimeEventWatchdog(normalizedThreadId);
-    const noticeTimer = setTimeout(async () => {
-      const watchdog = this.pendingRuntimeEventWatchdogs.get(normalizedThreadId);
-      if (!watchdog) {
-        return;
-      }
-      const currentThreadState = this.threadStateStore.getThreadState(normalizedThreadId);
-      if (currentThreadState?.status === "running" || currentThreadState?.turnId) {
-        return;
-      }
-      watchdog.noticeSent = true;
-      const noticeLines = isCodex
-        ? [
-            `⏳ This message has already reached the bridge, but ${runtimeName} has not returned the first event yet.`,
-            "If your terminal is still reconnecting, this round is probably still stuck in shared-thread startup.",
-            "You do not need to keep waiting in chat. If it reconnects later, the message will continue.",
-            `workspace: ${workspaceRoot}`,
-            `thread: ${normalizedThreadId}`,
-          ]
-        : [
-            `⏳ This message has already reached the bridge, but ${runtimeName} has not returned the first event yet.`,
-            "The runtime process may still be starting up.",
-            "You do not need to keep waiting in chat. If it reconnects later, the message will continue.",
-            `workspace: ${workspaceRoot}`,
-            `thread: ${normalizedThreadId}`,
-          ];
-      await this.channelAdapter.sendText({
-        userId: normalized.senderId,
-        contextToken: normalized.contextToken,
-        preserveBlock: true,
-        text: noticeLines.join("\n"),
-      }).catch(() => {});
-    }, FIRST_RUNTIME_EVENT_NOTICE_TIMEOUT_MS);
-    const failureTimer = setTimeout(async () => {
-      this.pendingRuntimeEventWatchdogs.delete(normalizedThreadId);
-      const currentThreadState = this.threadStateStore.getThreadState(normalizedThreadId);
-      if (currentThreadState?.status === "running" || currentThreadState?.turnId) {
-        return;
-      }
-      await this.channelAdapter.sendTyping({
-        userId: normalized.senderId,
-        status: 0,
-        contextToken: normalized.contextToken,
-      }).catch(() => {});
-      const failureLines = isCodex
-        ? [
-            `❌ This message has already reached the bridge, but ${runtimeName} still has not returned the first event.`,
-            "If the reconnecting cycle in the terminal already finished 5 attempts, this shared thread most likely never started successfully.",
-            `workspace: ${workspaceRoot}`,
-            `thread: ${normalizedThreadId}`,
-            "Check these first: whether the shared app-server is healthy, whether the terminal is attached to the same thread, and whether runtime actually started processing this message.",
-            "Recommended order:",
-            "1. Run `npm run shared:status` in the project directory",
-            "2. If the bridge is down, run `npm run shared:start`",
-            "3. Open another terminal and run `npm run shared:open`",
-            "4. Confirm the terminal is attached to the same thread shown above, not a private thread",
-          ]
-        : [
-            `❌ This message has already reached the bridge, but ${runtimeName} still has not returned the first event.`,
-            "The runtime process may have failed to start or exited unexpectedly.",
-            `workspace: ${workspaceRoot}`,
-            `thread: ${normalizedThreadId}`,
-            "Check whether the runtime process is still running, or run `npm run shared:status`.",
-          ];
-      await this.channelAdapter.sendText({
-        userId: normalized.senderId,
-        contextToken: normalized.contextToken,
-        preserveBlock: true,
-        text: failureLines.join("\n"),
-      }).catch(() => {});
-    }, FIRST_RUNTIME_EVENT_FAILURE_TIMEOUT_MS);
-    this.pendingRuntimeEventWatchdogs.set(normalizedThreadId, {
-      noticeTimer,
-      failureTimer,
-      noticeSent: false,
-    });
-  }
-
-  clearRuntimeEventWatchdog(threadId) {
-    const normalizedThreadId = normalizeCommandArgument(threadId);
-    if (!normalizedThreadId) {
-      return;
-    }
-    const watchdog = this.pendingRuntimeEventWatchdogs.get(normalizedThreadId);
-    if (!watchdog) {
-      return;
-    }
-    clearTimeout(watchdog.noticeTimer);
-    clearTimeout(watchdog.failureTimer);
-    this.pendingRuntimeEventWatchdogs.delete(normalizedThreadId);
-  }
-
   async prepareIncomingMessageForRuntime(normalized, workspaceRoot) {
     if (normalized?.provider === "system") {
       return {
@@ -868,15 +788,7 @@ class CyberbossApp {
 
     const attachments = Array.isArray(normalized.attachments) ? normalized.attachments : [];
     if (!attachments.length) {
-      return {
-        ...normalized,
-        originalText: normalized.text,
-        text: buildInboundText(normalized, { saved: [], failed: [] }, this.config, {
-          runtimeId: this.runtimeAdapter?.describe?.().id || "",
-        }),
-        attachments: [],
-        attachmentFailures: [],
-      };
+      return buildInboundDraft(normalized);
     }
 
     const persisted = await persistIncomingWeixinAttachments({
@@ -897,10 +809,11 @@ class CyberbossApp {
       return null;
     }
 
-    const codexInboundText = buildInboundText(normalized, persisted, this.config, {
-      runtimeId: this.runtimeAdapter?.describe?.().id || "",
+    const prepared = buildInboundDraft(normalized, {
+      attachments: persisted.saved,
+      attachmentFailures: persisted.failed,
     });
-    if (!codexInboundText) {
+    if (!prepared.originalText && !prepared.attachments.length && prepared.attachmentFailures.length) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
         text: `⚠️ Failed to receive image or attachment\n${persisted.failed.map((item) => item.reason).join("\n")}`,
@@ -910,13 +823,7 @@ class CyberbossApp {
       return null;
     }
 
-    return {
-      ...normalized,
-      originalText: normalized.text,
-      text: codexInboundText,
-      attachments: persisted.saved,
-      attachmentFailures: persisted.failed,
-    };
+    return prepared;
   }
 
   async flushPendingSystemMessages() {
@@ -1235,12 +1142,6 @@ class CyberbossApp {
         contextToken: normalized.contextToken,
         provider: normalized.provider,
       });
-      this.scheduleRuntimeEventWatchdog({
-        bindingKey,
-        workspaceRoot,
-        normalized,
-        threadId,
-      });
       const runtimeParams = sessionStore.getRuntimeParamsForWorkspace(bindingKey, workspaceRoot);
       await this.runtimeAdapter.refreshThreadInstructions({
         threadId,
@@ -1280,12 +1181,6 @@ class CyberbossApp {
         userId: normalized.senderId,
         contextToken: normalized.contextToken,
         provider: normalized.provider,
-      });
-      this.scheduleRuntimeEventWatchdog({
-        bindingKey,
-        workspaceRoot,
-        normalized,
-        threadId,
       });
       await this.runtimeAdapter.compactThread({
         threadId,
@@ -2293,180 +2188,6 @@ function buildScopeKey(bindingKey, workspaceRoot) {
     return "";
   }
   return `${normalizedBindingKey}::${normalizedWorkspaceRoot}`;
-}
-
-function buildInboundText(normalized, persisted = {}, config = {}, options = {}) {
-  const text = String(normalized?.text || "").trim();
-  const saved = Array.isArray(persisted?.saved) ? persisted.saved : [];
-  const failed = Array.isArray(persisted?.failed) ? persisted.failed : [];
-  const userName = String(config?.userName || "").trim() || "the user";
-  const runtimeId = normalizeText(options?.runtimeId).toLowerCase();
-  const localTime = formatWechatLocalTime(normalized?.receivedAt);
-  const lines = [];
-  if (localTime) {
-    lines.push(`[${localTime}]`);
-  }
-  if (text) {
-    if (lines.length) {
-      lines.push("");
-    }
-    lines.push(text);
-  }
-
-  if (saved.length) {
-    if (lines.length) {
-      lines.push("");
-    }
-    lines.push("Saved attachments:");
-    for (const item of saved) {
-      const suffix = item.sourceFileName ? ` (original name: ${item.sourceFileName})` : "";
-      lines.push(`- [${item.kind}] ${item.absolutePath}${suffix}`);
-    }
-    lines.push(`Read them before replying to ${userName}.`);
-    if (saved.some((item) => isImageAttachmentItem(item))) {
-      if (runtimeUsesReadForImages(runtimeId)) {
-        lines.push("Read every image first with `Read`.");
-      } else {
-        lines.push("Read every image first with `view_image`.");
-      }
-      lines.push("Say nothing before reading.");
-      lines.push(`If some images are reusable stickers, load \`cyberboss_sticker_tags\` only when needed. ${STICKER_TAG_GUIDANCE}`);
-      lines.push(`After reading the whole batch, call \`cyberboss_sticker_save_from_inbox\` once with an \`items\` array. Use 1-3 tags. ${STICKER_DESC_GUIDANCE} Skip ordinary photos, screenshots, and unclear images.`);
-      lines.push("Do not describe save steps. The system sends the sticker notice.");
-    }
-    lines.push(`If a required tool is missing, tell ${userName} what is missing.`);
-  }
-
-  if (failed.length) {
-    if (lines.length) {
-      lines.push("");
-    }
-    lines.push("Attachment intake errors:");
-    for (const item of failed) {
-      const label = item.sourceFileName || item.kind || "attachment";
-      lines.push(`- ${label}: ${item.reason}`);
-    }
-  }
-
-  return lines.join("\n").trim();
-}
-
-function runtimeUsesReadForImages(runtimeId) {
-  return runtimeId === "claudecode";
-}
-
-function buildMergedInboundPrepared({
-  bindingKey,
-  workspaceRoot,
-  messages = [],
-  trailingPrepared = null,
-  config = {},
-  runtimeId = "",
-}) {
-  const queued = Array.isArray(messages) ? messages.filter((message) => message && typeof message === "object") : [];
-  const latest = trailingPrepared || queued[queued.length - 1] || {};
-  const originalTexts = queued
-    .map((message) => normalizeText(message.originalText))
-    .filter(Boolean);
-  const trailingText = normalizeText(trailingPrepared?.originalText);
-  if (trailingText) {
-    originalTexts.push(trailingText);
-  }
-  const attachments = queued.flatMap((message) => Array.isArray(message.attachments) ? message.attachments : []);
-  const attachmentFailures = queued.flatMap((message) => Array.isArray(message.attachmentFailures) ? message.attachmentFailures : []);
-  const originalText = originalTexts.join("\n\n");
-
-  return {
-    bindingKey,
-    workspaceRoot,
-    ...latest,
-    originalText,
-    text: buildInboundText({
-      text: originalText,
-      receivedAt: latest.receivedAt,
-    }, {
-      saved: attachments,
-      failed: attachmentFailures,
-    }, config, {
-      runtimeId,
-    }),
-    attachments,
-    attachmentFailures,
-  };
-}
-
-function shouldBatchImageOnlyInbound(message) {
-  const originalText = normalizeText(message?.originalText);
-  const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
-  const attachmentFailures = Array.isArray(message?.attachmentFailures) ? message.attachmentFailures : [];
-  return !originalText
-    && attachments.length > 0
-    && attachments.every((item) => isImageAttachmentItem(item))
-    && attachmentFailures.length === 0;
-}
-
-function takeImageOnlyBatchMessages(messages, maxAttachments) {
-  const batchMessages = [];
-  const remainingMessages = [];
-  let remainingCapacity = Math.max(1, Number(maxAttachments) || 1);
-
-  for (const message of Array.isArray(messages) ? messages : []) {
-    const attachments = Array.isArray(message?.attachments) ? message.attachments : [];
-    if (!attachments.length) {
-      continue;
-    }
-    if (remainingCapacity <= 0) {
-      remainingMessages.push(message);
-      continue;
-    }
-    if (attachments.length <= remainingCapacity) {
-      batchMessages.push(message);
-      remainingCapacity -= attachments.length;
-      continue;
-    }
-    batchMessages.push({
-      ...message,
-      attachments: attachments.slice(0, remainingCapacity),
-    });
-    remainingMessages.push({
-      ...message,
-      attachments: attachments.slice(remainingCapacity),
-    });
-    remainingCapacity = 0;
-  }
-
-  return {
-    batchMessages,
-    remainingMessages,
-  };
-}
-
-function clonePreparedInboundMessage(prepared) {
-  return {
-    workspaceId: prepared.workspaceId,
-    accountId: prepared.accountId,
-    senderId: prepared.senderId,
-    messageId: prepared.messageId,
-    contextToken: prepared.contextToken,
-    provider: prepared.provider,
-    originalText: prepared.originalText,
-    text: prepared.text,
-    attachments: Array.isArray(prepared.attachments) ? prepared.attachments : [],
-    attachmentFailures: Array.isArray(prepared.attachmentFailures) ? prepared.attachmentFailures : [],
-    receivedAt: prepared.receivedAt,
-  };
-}
-
-function isPlainTextPreparedMessage(prepared) {
-  const originalText = normalizeText(prepared?.originalText);
-  const attachments = Array.isArray(prepared?.attachments) ? prepared.attachments : [];
-  const attachmentFailures = Array.isArray(prepared?.attachmentFailures) ? prepared.attachmentFailures : [];
-  return Boolean(originalText) && attachments.length === 0 && attachmentFailures.length === 0;
-}
-
-function isImageAttachmentItem(item) {
-  return Boolean(item?.isImage) || normalizeText(item?.contentType).toLowerCase().startsWith("image/")
-    || normalizeText(item?.kind).toLowerCase() === "image";
 }
 
 function isAutoApprovedStateDirOperation(approval, config = {}) {

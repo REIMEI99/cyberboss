@@ -170,6 +170,12 @@ function createClaudeCodeRuntimeAdapter(config) {
     getSessionStore() {
       return sessionStore;
     },
+    getTurnCapabilities() {
+      return {
+        nativeImageInput: false,
+        toolImageRead: false,
+      };
+    },
     async initialize() {
       ipcServer.start();
       return {
@@ -247,7 +253,10 @@ function createClaudeCodeRuntimeAdapter(config) {
       await client.sendUserMessage({ text: refreshText, threadId: activeThreadId });
       return { threadId: activeThreadId };
     },
-    async sendTextTurn({ bindingKey, workspaceRoot, text, metadata = {}, model = "" }) {
+    async sendTextTurn(args) {
+      return this.sendTurn(args);
+    },
+    async sendTurn({ bindingKey, workspaceRoot, text, metadata = {}, model = "" }) {
       let threadId = sessionStore.getThreadIdForWorkspace(bindingKey, workspaceRoot);
       if (!threadId) {
         sessionStore.clearThreadIdForWorkspace(bindingKey, workspaceRoot);

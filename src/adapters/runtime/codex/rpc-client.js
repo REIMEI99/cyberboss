@@ -141,8 +141,8 @@ class CodexRpcClient {
     this.isReady = true;
   }
 
-  async sendUserMessage({ threadId, text, model = null, modelProvider = null, effort = null, accessMode = null, workspaceRoot = "" }) {
-    const input = buildTurnInputPayload(text);
+  async sendUserMessage({ threadId, text, attachments = [], model = null, modelProvider = null, effort = null, accessMode = null, workspaceRoot = "" }) {
+    const input = buildTurnInputPayload({ text, attachments });
     return threadId
       ? this.sendRequest("turn/start", buildTurnStartParams({
         threadId,
@@ -362,9 +362,23 @@ function buildListThreadsParams({ cursor, limit, sortKey }) {
   return params;
 }
 
-function buildTurnInputPayload(text) {
+function buildTurnInputPayload({ text, attachments = [] }) {
+  const input = [];
   const normalizedText = normalizeNonEmptyString(text);
-  return normalizedText ? [{ type: "text", text: normalizedText }] : [];
+  if (normalizedText) {
+    input.push({ type: "text", text: normalizedText });
+  }
+  for (const attachment of Array.isArray(attachments) ? attachments : []) {
+    const absolutePath = normalizeNonEmptyString(attachment?.absolutePath);
+    if (!absolutePath) {
+      continue;
+    }
+    input.push({
+      type: "localImage",
+      path: absolutePath,
+    });
+  }
+  return input;
 }
 
 function buildTurnStartParams({ threadId, input, model, modelProvider, effort, accessMode, workspaceRoot, extraWritableRoots = [] }) {

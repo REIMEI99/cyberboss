@@ -10,6 +10,7 @@ const {
   extractTurnIdFromParams,
   isAssistantItemCompleted,
 } = require("./message-utils");
+const { findModelByQuery } = require("./model-catalog");
 const { SessionStore } = require("./session-store");
 const { resolveCodexProjectToolMcpServerConfig } = require("./mcp-config");
 
@@ -71,6 +72,22 @@ function createCodexRuntimeAdapter(config) {
     },
     getSessionStore() {
       return sessionStore;
+    },
+    getTurnCapabilities({ model = "" } = {}) {
+      const forcedNativeImageInput = config.codexNativeImageInput;
+      if (typeof forcedNativeImageInput === "boolean") {
+        return {
+          nativeImageInput: forcedNativeImageInput,
+          toolImageRead: false,
+        };
+      }
+      const effectiveModel = normalizeText(configuredModel) || normalizeText(model);
+      const catalog = sessionStore.getAvailableModelCatalog();
+      const catalogModel = findModelByQuery(catalog?.models, effectiveModel);
+      return {
+        nativeImageInput: hasImageInputModality(catalogModel),
+        toolImageRead: false,
+      };
     },
     async initialize() {
       const runtimeClient = ensureClient();
@@ -160,7 +177,10 @@ function createCodexRuntimeAdapter(config) {
       const result = await completion;
       return { threadId, ...result };
     },
-    async sendTextTurn({ bindingKey, workspaceRoot, text, metadata = {}, model = "" }) {
+    async sendTextTurn(args) {
+      return this.sendTurn(args);
+    },
+    async sendTurn({ bindingKey, workspaceRoot, text, attachments = [], metadata = {}, model = "" }) {
       const runtimeClient = ensureClient();
       await this.initialize();
 
@@ -220,6 +240,7 @@ function createCodexRuntimeAdapter(config) {
       const response = await runtimeClient.sendUserMessage({
         threadId,
         text: outboundText,
+        attachments,
         model: desiredModel,
         modelProvider: desiredModelProvider,
         workspaceRoot,
@@ -241,6 +262,11 @@ function normalizeText(value) {
 function runtimeParamsMatch(storedParams, desiredParams) {
   return normalizeText(storedParams?.model) === normalizeText(desiredParams?.model)
     && normalizeText(storedParams?.modelProvider) === normalizeText(desiredParams?.modelProvider);
+}
+
+function hasImageInputModality(model) {
+  const modalities = Array.isArray(model?.inputModalities) ? model.inputModalities : [];
+  return modalities.some((item) => normalizeText(item).toLowerCase() === "image");
 }
 
 function waitForTurnCompletion(client, threadId) {

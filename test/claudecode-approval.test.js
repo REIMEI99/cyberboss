@@ -251,9 +251,6 @@ test("handleCompactCommand invokes runtime compaction for the current thread", a
         calls.push(["queue", threadId, payload.userId, payload.contextToken, payload.provider]);
       },
     },
-    scheduleRuntimeEventWatchdog(payload) {
-      calls.push(["watchdog", payload.threadId, payload.workspaceRoot]);
-    },
     runtimeAdapter: {
       async compactThread(payload) {
         calls.push(["compact", payload.threadId, payload.workspaceRoot, payload.model]);
@@ -290,7 +287,6 @@ test("handleCompactCommand invokes runtime compaction for the current thread", a
 
   assert.deepEqual(calls, [
     ["queue", "thread-1", "user-1", "ctx-1", "weixin"],
-    ["watchdog", "thread-1", "/workspace"],
     ["compact", "thread-1", "/workspace", "claude-sonnet"],
     ["send", "🗜️ Compact request sent\nthread: thread-1"],
   ]);

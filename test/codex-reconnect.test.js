@@ -281,6 +281,45 @@ test("codex adapter lets configured env model override stored session model", as
   }
 });
 
+test("codex adapter enables native image input from model metadata or explicit override", async () => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-codex-image-cap-"));
+  const sessionsFile = path.join(tempDir, "sessions.json");
+  const indexPath = path.resolve(__dirname, "../src/adapters/runtime/codex/index.js");
+  delete require.cache[indexPath];
+  const { createCodexRuntimeAdapter } = require(indexPath);
+
+  const adapter = createCodexRuntimeAdapter({
+    sessionsFile,
+    codexEndpoint: "ws://127.0.0.1:8765",
+    stateDir: tempDir,
+    codexModel: "gemma4:26b-32k",
+    codexModelProvider: "ollama",
+  });
+  adapter.getSessionStore().setAvailableModelCatalog([{
+    slug: "gemma4:26b-32k",
+    input_modalities: ["text", "image"],
+  }]);
+
+  assert.deepEqual(adapter.getTurnCapabilities({ model: "gemma4:26b-32k" }), {
+    nativeImageInput: true,
+    toolImageRead: false,
+  });
+
+  const forcedOff = createCodexRuntimeAdapter({
+    sessionsFile: path.join(tempDir, "forced-off.json"),
+    codexNativeImageInput: false,
+    stateDir: tempDir,
+  });
+  assert.equal(forcedOff.getTurnCapabilities({ model: "gemma4:26b-32k" }).nativeImageInput, false);
+
+  const forcedOn = createCodexRuntimeAdapter({
+    sessionsFile: path.join(tempDir, "forced-on.json"),
+    codexNativeImageInput: true,
+    stateDir: tempDir,
+  });
+  assert.equal(forcedOn.getTurnCapabilities({ model: "unknown" }).nativeImageInput, true);
+});
+
 function emitMockCodexTurnCompleted(listeners, threadId, turnId) {
   for (const listener of listeners) {
     listener({

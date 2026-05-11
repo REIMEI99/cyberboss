@@ -146,6 +146,7 @@ CYBERBOSS_CODEX_ENDPOINT=ws://127.0.0.1:8765
 CYBERBOSS_CODEX_COMMAND=
 CYBERBOSS_CODEX_MODEL=
 CYBERBOSS_CODEX_MODEL_PROVIDER=
+CYBERBOSS_CODEX_NATIVE_IMAGE_INPUT=
 CYBERBOSS_CLAUDE_COMMAND=claude
 CYBERBOSS_CLAUDE_MODEL=
 CYBERBOSS_CLAUDE_CONTEXT_WINDOW=
@@ -153,6 +154,12 @@ CYBERBOSS_CLAUDE_PERMISSION_MODE=default
 CYBERBOSS_CLAUDE_DISABLE_VERBOSE=false
 CYBERBOSS_CLAUDE_EXTRA_ARGS=
 CLAUDE_CODE_MAX_OUTPUT_TOKENS=
+CYBERBOSS_VISION_MODE=auto
+CYBERBOSS_VISION_PROVIDER=openai-compatible
+CYBERBOSS_VISION_API_BASE_URL=
+CYBERBOSS_VISION_API_KEY=
+CYBERBOSS_VISION_MODEL=
+CYBERBOSS_VISION_TIMEOUT_MS=30000
 CYBERBOSS_ACCOUNT_ID=
 CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS=20
 CYBERBOSS_WEIXIN_BASE_URL=https://ilinkai.weixin.qq.com
@@ -181,6 +188,8 @@ CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT=100
   强制 Codex turn 使用指定模型。留空则使用 Codex 默认模型选择。
 - `CYBERBOSS_CODEX_MODEL_PROVIDER`
   强制 Codex turn 使用指定 provider，例如本地模型可填 `ollama`。留空则使用默认云端 provider。
+- `CYBERBOSS_CODEX_NATIVE_IMAGE_INPUT`
+  Codex app-server 直传图片能力的可选覆盖。留空时按 model metadata 判断；设为 `true` 可直接测试本地多模态模型，设为 `false` 可强制走 caption fallback。
 - `CYBERBOSS_CLAUDE_COMMAND`
   自定义 Claude 启动命令，默认是 `claude`。
 - `CYBERBOSS_CLAUDE_MODEL`
@@ -195,6 +204,12 @@ CYBERBOSS_LOCATION_BATTERY_HISTORY_LIMIT=100
   以逗号分隔的形式追加 Claude CLI 参数。
 - `CLAUDE_CODE_MAX_OUTPUT_TOKENS`
   为 Claude 回复预留输出 token。`/status` 会先从 Claude 上下文窗口里减掉这部分预留量。
+- `CYBERBOSS_VISION_MODE`
+  设置入站图片处理方式：`auto`、`caption`、`native` 或 `off`。`auto` 会在 runtime 支持原生图片输入时直接传图，否则使用 caption。
+- `CYBERBOSS_VISION_PROVIDER`、`CYBERBOSS_VISION_API_BASE_URL`、`CYBERBOSS_VISION_API_KEY`、`CYBERBOSS_VISION_MODEL`
+  配置可选的 OpenAI-compatible 识图 caption API，供 DeepSeek 这类文本模型使用。Qwen/DashScope 可从 [templates/vision-openai-compatible.env](./templates/vision-openai-compatible.env) 开始。
+- `CYBERBOSS_VISION_TIMEOUT_MS`
+  单张图片 caption 请求超时时间。
 - `CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS`
   设置微信短分片合并阈值默认值。
 - `CYBERBOSS_WEIXIN_BASE_URL`、`CYBERBOSS_WEIXIN_CDN_BASE_URL`、`CYBERBOSS_WEIXIN_QR_BOT_TYPE`
