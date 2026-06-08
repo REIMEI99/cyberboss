@@ -157,6 +157,7 @@ CYBERBOSS_VISION_MODEL=
 CYBERBOSS_VISION_TIMEOUT_MS=30000
 CYBERBOSS_ACCOUNT_ID=
 CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS=20
+CYBERBOSS_WEIXIN_SHOW_TOOL_CALLS=false
 CYBERBOSS_WEIXIN_BASE_URL=https://ilinkai.weixin.qq.com
 CYBERBOSS_WEIXIN_CDN_BASE_URL=https://novac2c.cdn.weixin.qq.com/c2c
 CYBERBOSS_WEIXIN_QR_BOT_TYPE=3
@@ -207,6 +208,8 @@ What these do:
   Timeout for each image caption request.
 - `CYBERBOSS_WEIXIN_MIN_CHUNK_CHARS`
   Set the default minimum merge size for short WeChat reply chunks.
+- `CYBERBOSS_WEIXIN_SHOW_TOOL_CALLS`
+  Show runtime tool calls as separate WeChat messages such as `🔧cyberboss_tools.cyberboss_reminder_create`. Default is `false`; users can also toggle it with `/tools on` and `/tools off`.
 - `CYBERBOSS_WEIXIN_BASE_URL`, `CYBERBOSS_WEIXIN_CDN_BASE_URL`, `CYBERBOSS_WEIXIN_QR_BOT_TYPE`
   Override the WeChat bridge endpoints and QR bot type when your deployment needs it.
 - `CYBERBOSS_ENABLE_LOCATION_SERVER`
@@ -303,6 +306,8 @@ Switch the runtime with `CYBERBOSS_RUNTIME`. You do not need a different command
   Update the proactive random check-in range for the current project
 - `/chunk <number>`
   Adjust the minimum merge size for short WeChat reply chunks
+- `/tools`, `/tools on`, `/tools off`
+  Show, enable, or disable separate tool call notices in WeChat
 - `/yes`
   Allow the current approval once
 - `/always`

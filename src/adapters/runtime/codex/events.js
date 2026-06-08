@@ -20,6 +20,9 @@ function mapCodexMessageToRuntimeEvent(message) {
       payload: normalizeContextPayload(message),
     };
   }
+  if (message?.type === "response_item" && normalizeString(message?.payload?.type) === "function_call") {
+    return mapFunctionCallItemToToolEvent(message);
+  }
   const method = normalizeString(message?.method);
   const params = message?.params || {};
   const threadId = extractThreadIdFromParams(params);
@@ -114,6 +117,28 @@ function mapCodexMessageToRuntimeEvent(message) {
   return null;
 }
 
+function mapFunctionCallItemToToolEvent(message) {
+  const payload = message?.payload || {};
+  const toolName = normalizeString(payload?.name);
+  const namespace = normalizeString(payload?.namespace);
+  if (!toolName) {
+    return null;
+  }
+  const serverName = extractMcpServerName(namespace);
+  return {
+    type: "runtime.tool.started",
+    payload: {
+      runtimeId: "codex",
+      threadId: normalizeString(payload?.thread_id || payload?.threadId),
+      turnId: normalizeString(payload?.turn_id || payload?.turnId),
+      callId: normalizeString(payload?.call_id || payload?.callId),
+      toolName,
+      serverName,
+      displayName: formatToolCallDisplayName({ serverName, toolName }),
+    },
+  };
+}
+
 function normalizeContextPayload(message) {
   const payload = message?.payload || {};
   const info = payload?.info || {};
@@ -128,6 +153,23 @@ function normalizeContextPayload(message) {
     currentTokens: numberOrZero(total.total_tokens),
     contextWindow: numberOrZero(info?.model_context_window),
   };
+}
+
+function extractMcpServerName(namespace) {
+  const normalized = normalizeString(namespace);
+  if (!normalized.startsWith("mcp__")) {
+    return "";
+  }
+  const parts = normalized.split("__").map((part) => part.trim()).filter(Boolean);
+  return parts[0] === "mcp" && parts[1] ? parts[1] : "";
+}
+
+function formatToolCallDisplayName({ serverName = "", toolName = "" } = {}) {
+  const normalizedToolName = normalizeString(toolName);
+  const normalizedServerName = normalizeString(serverName);
+  return normalizedServerName
+    ? `${normalizedServerName}.${normalizedToolName}`
+    : normalizedToolName;
 }
 
 function isApprovalRequestMethod(method) {

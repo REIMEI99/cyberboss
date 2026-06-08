@@ -18,7 +18,9 @@ function createWeixinChannelAdapter(config) {
   let selectedAccount = null;
   let contextTokenCache = null;
   const inboundFilter = createInboundFilter();
-  let minWeixinChunk = loadWeixinConfig(config).minChunkChars;
+  const weixinConfig = loadWeixinConfig(config);
+  let minWeixinChunk = weixinConfig.minChunkChars;
+  let showToolCalls = weixinConfig.showToolCalls;
 
   function ensureAccount() {
     if (!selectedAccount) {
@@ -217,12 +219,20 @@ function createWeixinChannelAdapter(config) {
       const parsed = Number.parseInt(String(value), 10);
       if (Number.isFinite(parsed) && parsed >= 1 && parsed <= MAX_WEIXIN_CHUNK) {
         minWeixinChunk = parsed;
-        saveWeixinConfig(config, { minChunkChars: minWeixinChunk });
+        saveWeixinConfig(config, { minChunkChars: minWeixinChunk, showToolCalls });
       }
       return minWeixinChunk;
     },
     getMinChunkChars() {
       return minWeixinChunk;
+    },
+    setShowToolCalls(value) {
+      showToolCalls = Boolean(value);
+      saveWeixinConfig(config, { minChunkChars: minWeixinChunk, showToolCalls });
+      return showToolCalls;
+    },
+    getShowToolCalls() {
+      return Boolean(showToolCalls);
     },
   };
 }

@@ -3,7 +3,11 @@ const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
 const { createWeixinChannelAdapter } = require("../adapters/channel/weixin");
-const { DEFAULT_MIN_WEIXIN_CHUNK, MAX_MIN_WEIXIN_CHUNK } = require("../adapters/channel/weixin/config-store");
+const {
+  DEFAULT_MIN_WEIXIN_CHUNK,
+  MAX_MIN_WEIXIN_CHUNK,
+  DEFAULT_SHOW_TOOL_CALLS,
+} = require("../adapters/channel/weixin/config-store");
 const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin/media-receive");
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
 const { createClaudeCodeRuntimeAdapter } = require("../adapters/runtime/claudecode");
@@ -978,6 +982,9 @@ class CyberbossApp {
       case "chunk":
         await this.handleChunkCommand(normalized, command);
         return;
+      case "tools":
+        await this.handleToolVisibilityCommand(normalized, command);
+        return;
       case "yes":
       case "always":
       case "no":
@@ -1331,6 +1338,36 @@ class CyberbossApp {
     });
   }
 
+  async handleToolVisibilityCommand(normalized, command) {
+    const arg = normalizeCommandArgument(command.args).toLowerCase();
+    if (!arg) {
+      const enabled = this.channelAdapter.getShowToolCalls?.() ?? DEFAULT_SHOW_TOOL_CALLS;
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: `🔧 Tool call notices are ${enabled ? "on" : "off"}. Usage: /tools on or /tools off`,
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    const next = parseBooleanCommandArgument(arg);
+    if (next === null) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: "💡 Usage: /tools on or /tools off",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    const enabled = this.channelAdapter.setShowToolCalls?.(next) ?? next;
+    await this.channelAdapter.sendText({
+      userId: normalized.senderId,
+      text: `✅ Tool call notices ${enabled ? "enabled" : "disabled"}.`,
+      contextToken: normalized.contextToken,
+    });
+  }
+
   async handleApprovalCommand(normalized, command) {
     const bindingKey = this.runtimeAdapter.getSessionStore().buildBindingKey({
       workspaceId: normalized.workspaceId,
@@ -1474,6 +1511,10 @@ class CyberbossApp {
     if (!event) {
       return;
     }
+    if (event.type === "runtime.tool.started") {
+      await this.sendToolCallNotice(event);
+      return;
+    }
     if (event.type === "runtime.turn.completed" || event.type === "runtime.turn.failed") {
       const completedRunKey = buildRunKey(event.payload.threadId, event.payload.turnId);
       const pendingOperations = this.pendingOperationByRunKey;
@@ -1605,6 +1646,61 @@ class CyberbossApp {
     }).catch(() => {});
   }
 
+  async sendToolCallNotice(event) {
+    const enabled = this.channelAdapter.getShowToolCalls?.() ?? DEFAULT_SHOW_TOOL_CALLS;
+    if (!enabled) {
+      return;
+    }
+    const text = buildToolCallNoticeText(event?.payload);
+    if (!text) {
+      return;
+    }
+    const target = this.resolveToolCallReplyTarget(event?.payload);
+    if (!target) {
+      console.warn(
+        `[cyberboss] tool call notice skipped tool=${normalizeText(event?.payload?.displayName || event?.payload?.toolName)} reason=no_reply_target`
+      );
+      return;
+    }
+    await this.channelAdapter.sendText({
+      userId: target.userId,
+      text,
+      contextToken: target.contextToken,
+      preserveBlock: true,
+    }).catch(() => {});
+  }
+
+  resolveToolCallReplyTarget(payload = {}) {
+    const threadId = normalizeCommandArgument(payload?.threadId);
+    const turnId = normalizeCommandArgument(payload?.turnId);
+    if (threadId) {
+      const target = normalizeReplyTarget(this.streamDelivery.resolveReplyTargetForRun?.({ threadId, turnId }));
+      if (target) {
+        return target;
+      }
+      const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(threadId);
+      return normalizeReplyTarget(
+        linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null
+      );
+    }
+
+    const activeRun = resolveSingleActiveThreadRun(this.threadStateStore.snapshot?.() || []);
+    if (!activeRun?.threadId) {
+      return null;
+    }
+    const activeTarget = normalizeReplyTarget(this.streamDelivery.resolveReplyTargetForRun?.({
+      threadId: activeRun.threadId,
+      turnId: activeRun.turnId,
+    }));
+    if (activeTarget) {
+      return activeTarget;
+    }
+    const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(activeRun.threadId);
+    return normalizeReplyTarget(
+      linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null
+    );
+  }
+
   async sendApprovalPrompt({ bindingKey, approval }) {
     const target = this.resolveReplyTargetForBinding(bindingKey);
     if (!target) {
@@ -1685,6 +1781,56 @@ class CyberbossApp {
 
 function buildRunKey(threadId, turnId) {
   return `${normalizeCommandArgument(threadId)}:${normalizeCommandArgument(turnId)}`;
+}
+
+function parseBooleanCommandArgument(value) {
+  const normalized = normalizeCommandArgument(value).toLowerCase();
+  if (["on", "true", "yes", "1", "enable", "enabled"].includes(normalized)) {
+    return true;
+  }
+  if (["off", "false", "no", "0", "disable", "disabled"].includes(normalized)) {
+    return false;
+  }
+  return null;
+}
+
+function resolveSingleActiveThreadRun(snapshot) {
+  const active = Array.isArray(snapshot)
+    ? snapshot.filter((entry) => {
+        const status = normalizeText(entry?.status);
+        return status === "running" || status === "waiting_approval";
+      })
+    : [];
+  if (active.length !== 1) {
+    return null;
+  }
+  return {
+    threadId: normalizeCommandArgument(active[0]?.threadId),
+    turnId: normalizeCommandArgument(active[0]?.turnId),
+  };
+}
+
+function buildToolCallNoticeText(payload = {}) {
+  const displayName = normalizeToolCallDisplayName(
+    payload?.displayName || formatToolCallDisplayName(payload)
+  );
+  return displayName ? `🔧${displayName}` : "";
+}
+
+function formatToolCallDisplayName(payload = {}) {
+  const toolName = normalizeToolCallDisplayName(payload?.toolName || payload?.rawToolName);
+  const serverName = normalizeToolCallDisplayName(payload?.serverName);
+  if (!toolName) {
+    return "";
+  }
+  return serverName ? `${serverName}.${toolName}` : toolName;
+}
+
+function normalizeToolCallDisplayName(value) {
+  return normalizeText(value)
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .replace(/\s+/g, " ")
+    .slice(0, 160);
 }
 
 function normalizeReplyTarget(target) {

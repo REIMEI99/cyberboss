@@ -135,6 +135,13 @@ const COMMAND_GROUPS = [
         weixin: ["/chunk <number>"],
         status: "active",
       },
+      {
+        action: "channel.tool_call_visibility",
+        summary: "Show or hide runtime tool call notices in WeChat",
+        terminal: [],
+        weixin: ["/tools", "/tools on", "/tools off"],
+        status: "active",
+      },
     ],
   },
   {
@@ -329,6 +336,8 @@ function actionEmoji(action) {
     case "thread.switch": return "🔀";
     case "thread.stop": return "⏹️";
     case "system.checkin_range": return "⏰";
+    case "channel.chunk_min": return "✂️";
+    case "channel.tool_call_visibility": return "🔧";
     case "approval.accept_once": return "✅";
     case "approval.accept_workspace": return "💡";
     case "approval.reject_once": return "❌";

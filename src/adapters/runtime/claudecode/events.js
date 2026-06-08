@@ -31,6 +31,8 @@ function mapClaudeCodeMessageToRuntimeEvent(message, raw) {
           text: message.text,
         },
       };
+    case "tool.use":
+      return mapToolUseToRuntimeEvent(message);
     case "turn.completed":
       return {
         type: "runtime.turn.completed",
@@ -74,6 +76,53 @@ function mapClaudeCodeMessageToRuntimeEvent(message, raw) {
     default:
       return null;
   }
+}
+
+function mapToolUseToRuntimeEvent(message) {
+  const toolName = normalizeString(message?.toolName);
+  if (!toolName) {
+    return null;
+  }
+  const { serverName, displayToolName } = parseClaudeCodeToolName(toolName);
+  return {
+    type: "runtime.tool.started",
+    payload: {
+      runtimeId: "claudecode",
+      threadId: normalizeString(message?.sessionId),
+      turnId: normalizeString(message?.turnId),
+      toolName: displayToolName,
+      rawToolName: toolName,
+      serverName,
+      displayName: formatToolCallDisplayName({ serverName, toolName: displayToolName }),
+    },
+  };
+}
+
+function parseClaudeCodeToolName(toolName) {
+  const normalized = normalizeString(toolName);
+  if (!normalized.startsWith("mcp__")) {
+    return {
+      serverName: "",
+      displayToolName: normalized,
+    };
+  }
+  const parts = normalized.split("__").map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 3 || parts[0] !== "mcp") {
+    return {
+      serverName: "",
+      displayToolName: normalized,
+    };
+  }
+  return {
+    serverName: parts[1],
+    displayToolName: parts.slice(2).join("__") || normalized,
+  };
+}
+
+function formatToolCallDisplayName({ serverName = "", toolName = "" } = {}) {
+  const normalizedToolName = normalizeString(toolName);
+  const normalizedServerName = normalizeString(serverName);
+  return normalizedServerName ? `${normalizedServerName}.${normalizedToolName}` : normalizedToolName;
 }
 
 function formatToolCommand(toolName, input) {

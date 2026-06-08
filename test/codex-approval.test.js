@@ -3,6 +3,7 @@ const assert = require("node:assert/strict");
 
 const { CyberbossApp } = require("../src/core/app");
 const { mapCodexMessageToRuntimeEvent } = require("../src/adapters/runtime/codex/events");
+const { mapClaudeCodeMessageToRuntimeEvent } = require("../src/adapters/runtime/claudecode/events");
 const { buildCodexMcpConfigArgs } = require("../src/adapters/runtime/codex/mcp-config");
 
 test("codex MCP config auto-approves cyberboss tools", () => {
@@ -85,6 +86,42 @@ test("codex MCP elicitation approvals map to runtime approval events", () => {
   });
 });
 
+test("codex function_call response items map to runtime tool events", () => {
+  const event = mapCodexMessageToRuntimeEvent({
+    type: "response_item",
+    payload: {
+      type: "function_call",
+      name: "cyberboss_reminder_create",
+      namespace: "mcp__cyberboss_tools__",
+      call_id: "call-1",
+    },
+  });
+
+  assert.equal(event.type, "runtime.tool.started");
+  assert.equal(event.payload.runtimeId, "codex");
+  assert.equal(event.payload.serverName, "cyberboss_tools");
+  assert.equal(event.payload.toolName, "cyberboss_reminder_create");
+  assert.equal(event.payload.callId, "call-1");
+  assert.equal(event.payload.displayName, "cyberboss_tools.cyberboss_reminder_create");
+});
+
+test("claudecode tool.use messages map MCP tool names to runtime tool events", () => {
+  const event = mapClaudeCodeMessageToRuntimeEvent({
+    type: "tool.use",
+    sessionId: "thread-1",
+    turnId: "turn-1",
+    toolName: "mcp__cyberboss_tools__cyberboss_timeline_write",
+  });
+
+  assert.equal(event.type, "runtime.tool.started");
+  assert.equal(event.payload.runtimeId, "claudecode");
+  assert.equal(event.payload.threadId, "thread-1");
+  assert.equal(event.payload.turnId, "turn-1");
+  assert.equal(event.payload.serverName, "cyberboss_tools");
+  assert.equal(event.payload.toolName, "cyberboss_timeline_write");
+  assert.equal(event.payload.displayName, "cyberboss_tools.cyberboss_timeline_write");
+});
+
 test("handleRuntimeEvent auto-approves project-native Codex MCP elicitation approvals", async () => {
   const responses = [];
   const appLike = {
@@ -145,6 +182,61 @@ test("handleRuntimeEvent auto-approves project-native Codex MCP elicitation appr
     result: {
       action: "accept",
     },
+  }]);
+});
+
+test("handleRuntimeEvent sends tool call notices to the active WeChat thread when enabled", async () => {
+  const sent = [];
+  const appLike = Object.assign(Object.create(CyberbossApp.prototype), {
+    channelAdapter: {
+      getShowToolCalls() {
+        return true;
+      },
+      async sendText(payload) {
+        sent.push(payload);
+      },
+    },
+    streamDelivery: {
+      async handleRuntimeEvent() {},
+      resolveReplyTargetForRun({ threadId, turnId }) {
+        assert.equal(threadId, "thread-1");
+        assert.equal(turnId, "turn-1");
+        return {
+          userId: "user-1",
+          contextToken: "ctx-1",
+          provider: "weixin",
+        };
+      },
+    },
+    threadStateStore: {
+      snapshot() {
+        return [{ threadId: "thread-1", turnId: "turn-1", status: "running" }];
+      },
+    },
+    runtimeAdapter: {
+      getSessionStore() {
+        return {
+          findBindingForThreadId() {
+            return null;
+          },
+        };
+      },
+    },
+  });
+
+  await CyberbossApp.prototype.handleRuntimeEvent.call(appLike, {
+    type: "runtime.tool.started",
+    payload: {
+      runtimeId: "codex",
+      displayName: "cyberboss_tools.cyberboss_reminder_create",
+    },
+  });
+
+  assert.deepEqual(sent, [{
+    userId: "user-1",
+    text: "🔧cyberboss_tools.cyberboss_reminder_create",
+    contextToken: "ctx-1",
+    preserveBlock: true,
   }]);
 });
 

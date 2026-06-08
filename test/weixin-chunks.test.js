@@ -1,5 +1,8 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
 
 const {
   splitUtf8,
@@ -16,6 +19,36 @@ const {
   findBoundaryPunctuationEnd,
   trimOuterBlankLines,
 } = require("../src/adapters/channel/weixin/index");
+const {
+  loadWeixinConfig,
+  saveWeixinConfig,
+} = require("../src/adapters/channel/weixin/config-store");
+
+test("weixin config persists tool call visibility without losing chunk settings", () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-weixin-config-"));
+  const config = {
+    weixinConfigFile: path.join(tmpDir, "weixin.json"),
+    weixinMinChunkChars: 33,
+    weixinShowToolCalls: false,
+  };
+
+  assert.deepEqual(loadWeixinConfig(config), {
+    minChunkChars: 33,
+    showToolCalls: false,
+  });
+
+  saveWeixinConfig(config, { showToolCalls: true });
+  assert.deepEqual(loadWeixinConfig(config), {
+    minChunkChars: 33,
+    showToolCalls: true,
+  });
+
+  saveWeixinConfig(config, { minChunkChars: 80 });
+  assert.deepEqual(loadWeixinConfig(config), {
+    minChunkChars: 80,
+    showToolCalls: true,
+  });
+});
 
 test("normalizeWeixinReplyText trims outer blank lines but preserves internal blank lines", () => {
   const text = "line1\r\n\r\n\nline2\n\n\nline3";
