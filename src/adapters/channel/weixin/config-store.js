@@ -4,6 +4,7 @@ const path = require("path");
 const DEFAULT_MIN_WEIXIN_CHUNK = 20;
 const MAX_MIN_WEIXIN_CHUNK = 3800;
 const DEFAULT_SHOW_TOOL_CALLS = false;
+const DEFAULT_SHOW_TOOL_CALL_DETAILS = false;
 
 function loadWeixinConfig(config) {
   const filePath = config?.weixinConfigFile;
@@ -18,6 +19,7 @@ function loadWeixinConfig(config) {
     return {
       minChunkChars: envDefault,
       showToolCalls: showToolCallsDefault,
+      showToolCallDetails: DEFAULT_SHOW_TOOL_CALL_DETAILS,
     };
   }
   try {
@@ -26,11 +28,13 @@ function loadWeixinConfig(config) {
     return {
       minChunkChars: normalizeMinChunkChars(parsed?.minChunkChars, envDefault),
       showToolCalls: normalizeShowToolCalls(parsed?.showToolCalls, showToolCallsDefault),
+      showToolCallDetails: normalizeShowToolCallDetails(parsed?.showToolCallDetails),
     };
   } catch {
     return {
       minChunkChars: envDefault,
       showToolCalls: showToolCallsDefault,
+      showToolCallDetails: DEFAULT_SHOW_TOOL_CALL_DETAILS,
     };
   }
 }
@@ -48,6 +52,7 @@ function saveWeixinConfig(config, values) {
       {
         minChunkChars: normalizeMinChunkChars(values?.minChunkChars, current.minChunkChars),
         showToolCalls: normalizeShowToolCalls(values?.showToolCalls, current.showToolCalls),
+        showToolCallDetails: normalizeShowToolCallDetails(values?.showToolCallDetails, current.showToolCallDetails),
       },
       null,
       2,
@@ -77,12 +82,18 @@ function normalizeShowToolCalls(value, defaultValue = DEFAULT_SHOW_TOOL_CALLS) {
   return Boolean(defaultValue);
 }
 
+function normalizeShowToolCallDetails(value, defaultValue = DEFAULT_SHOW_TOOL_CALL_DETAILS) {
+  return normalizeShowToolCalls(value, defaultValue);
+}
+
 module.exports = {
   loadWeixinConfig,
   saveWeixinConfig,
   DEFAULT_MIN_WEIXIN_CHUNK,
   MAX_MIN_WEIXIN_CHUNK,
   DEFAULT_SHOW_TOOL_CALLS,
+  DEFAULT_SHOW_TOOL_CALL_DETAILS,
   normalizeMinChunkChars,
   normalizeShowToolCalls,
+  normalizeShowToolCallDetails,
 };

@@ -7,6 +7,7 @@ const {
   DEFAULT_MIN_WEIXIN_CHUNK,
   MAX_MIN_WEIXIN_CHUNK,
   DEFAULT_SHOW_TOOL_CALLS,
+  DEFAULT_SHOW_TOOL_CALL_DETAILS,
 } = require("../adapters/channel/weixin/config-store");
 const { persistIncomingWeixinAttachments } = require("../adapters/channel/weixin/media-receive");
 const { createCodexRuntimeAdapter } = require("../adapters/runtime/codex");
@@ -1342,9 +1343,21 @@ class CyberbossApp {
     const arg = normalizeCommandArgument(command.args).toLowerCase();
     if (!arg) {
       const enabled = this.channelAdapter.getShowToolCalls?.() ?? DEFAULT_SHOW_TOOL_CALLS;
+      const detailEnabled = this.channelAdapter.getShowToolCallDetails?.() ?? DEFAULT_SHOW_TOOL_CALL_DETAILS;
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `🔧 Tool call notices are ${enabled ? "on" : "off"}. Usage: /tools on or /tools off`,
+        text: `🔧 Tool call notices are ${enabled ? "on" : "off"}; detail is ${detailEnabled ? "on" : "off"}. Usage: /tools on, /tools off, or /tools detail`,
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    if (arg === "detail" || arg === "details") {
+      this.channelAdapter.setShowToolCalls?.(true);
+      const detailEnabled = this.channelAdapter.setShowToolCallDetails?.(true) ?? true;
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: `✅ Tool call notices enabled with ${detailEnabled ? "details" : "names only"}.`,
         contextToken: normalized.contextToken,
       });
       return;
@@ -1354,16 +1367,17 @@ class CyberbossApp {
     if (next === null) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "💡 Usage: /tools on or /tools off",
+        text: "💡 Usage: /tools on, /tools off, or /tools detail",
         contextToken: normalized.contextToken,
       });
       return;
     }
 
     const enabled = this.channelAdapter.setShowToolCalls?.(next) ?? next;
+    this.channelAdapter.setShowToolCallDetails?.(false);
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
-      text: `✅ Tool call notices ${enabled ? "enabled" : "disabled"}.`,
+      text: `✅ Tool call notices ${enabled ? "enabled" : "disabled"}${enabled ? " with names only" : ""}.`,
       contextToken: normalized.contextToken,
     });
   }
@@ -1651,7 +1665,8 @@ class CyberbossApp {
     if (!enabled) {
       return;
     }
-    const text = buildToolCallNoticeText(event?.payload);
+    const showDetails = this.channelAdapter.getShowToolCallDetails?.() ?? DEFAULT_SHOW_TOOL_CALL_DETAILS;
+    const text = buildToolCallNoticeText(event?.payload, { showDetails });
     if (!text) {
       return;
     }
@@ -1810,18 +1825,18 @@ function resolveSingleActiveThreadRun(snapshot) {
   };
 }
 
-function buildToolCallNoticeText(payload = {}) {
+function buildToolCallNoticeText(payload = {}, { showDetails = false } = {}) {
   const displayName = normalizeToolCallDisplayName(
     payload?.displayName || formatToolCallDisplayName(payload)
   );
   if (!displayName) {
     return "";
   }
-  const detail = normalizeToolCallDetail(payload?.detail || payload?.toolDetail);
   const lines = [
     "🔧 tool call:",
     displayName,
   ];
+  const detail = showDetails ? normalizeToolCallDetail(payload?.detail || payload?.toolDetail) : "";
   if (detail) {
     lines.push(`detail: ${detail}`);
   }

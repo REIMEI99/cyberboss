@@ -35,18 +35,21 @@ test("weixin config persists tool call visibility without losing chunk settings"
   assert.deepEqual(loadWeixinConfig(config), {
     minChunkChars: 33,
     showToolCalls: false,
+    showToolCallDetails: false,
   });
 
   saveWeixinConfig(config, { showToolCalls: true });
   assert.deepEqual(loadWeixinConfig(config), {
     minChunkChars: 33,
     showToolCalls: true,
+    showToolCallDetails: false,
   });
 
-  saveWeixinConfig(config, { minChunkChars: 80 });
+  saveWeixinConfig(config, { minChunkChars: 80, showToolCallDetails: true });
   assert.deepEqual(loadWeixinConfig(config), {
     minChunkChars: 80,
     showToolCalls: true,
+    showToolCallDetails: true,
   });
 });
 

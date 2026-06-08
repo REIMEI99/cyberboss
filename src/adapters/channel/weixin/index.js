@@ -21,6 +21,7 @@ function createWeixinChannelAdapter(config) {
   const weixinConfig = loadWeixinConfig(config);
   let minWeixinChunk = weixinConfig.minChunkChars;
   let showToolCalls = weixinConfig.showToolCalls;
+  let showToolCallDetails = weixinConfig.showToolCallDetails;
 
   function ensureAccount() {
     if (!selectedAccount) {
@@ -219,7 +220,7 @@ function createWeixinChannelAdapter(config) {
       const parsed = Number.parseInt(String(value), 10);
       if (Number.isFinite(parsed) && parsed >= 1 && parsed <= MAX_WEIXIN_CHUNK) {
         minWeixinChunk = parsed;
-        saveWeixinConfig(config, { minChunkChars: minWeixinChunk, showToolCalls });
+        saveWeixinConfig(config, { minChunkChars: minWeixinChunk, showToolCalls, showToolCallDetails });
       }
       return minWeixinChunk;
     },
@@ -228,11 +229,19 @@ function createWeixinChannelAdapter(config) {
     },
     setShowToolCalls(value) {
       showToolCalls = Boolean(value);
-      saveWeixinConfig(config, { minChunkChars: minWeixinChunk, showToolCalls });
+      saveWeixinConfig(config, { minChunkChars: minWeixinChunk, showToolCalls, showToolCallDetails });
       return showToolCalls;
     },
     getShowToolCalls() {
       return Boolean(showToolCalls);
+    },
+    setShowToolCallDetails(value) {
+      showToolCallDetails = Boolean(value);
+      saveWeixinConfig(config, { minChunkChars: minWeixinChunk, showToolCalls, showToolCallDetails });
+      return showToolCallDetails;
+    },
+    getShowToolCallDetails() {
+      return Boolean(showToolCallDetails);
     },
   };
 }

@@ -139,7 +139,7 @@ const COMMAND_GROUPS = [
         action: "channel.tool_call_visibility",
         summary: "Show or hide runtime tool call notices in WeChat",
         terminal: [],
-        weixin: ["/tools", "/tools on", "/tools off"],
+        weixin: ["/tools", "/tools on", "/tools off", "/tools detail"],
         status: "active",
       },
     ],

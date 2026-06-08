@@ -173,6 +173,9 @@ test("handleRuntimeEvent sends tool call notices to the active WeChat thread whe
       getShowToolCalls() {
         return true;
       },
+      getShowToolCallDetails() {
+        return true;
+      },
       async sendText(payload) {
         sent.push(payload);
       },
@@ -220,6 +223,97 @@ test("handleRuntimeEvent sends tool call notices to the active WeChat thread whe
     contextToken: "ctx-1",
     preserveBlock: true,
   }]);
+});
+
+test("handleRuntimeEvent hides tool call details unless detail mode is enabled", async () => {
+  const sent = [];
+  const appLike = Object.assign(Object.create(CyberbossApp.prototype), {
+    channelAdapter: {
+      getShowToolCalls() {
+        return true;
+      },
+      getShowToolCallDetails() {
+        return false;
+      },
+      async sendText(payload) {
+        sent.push(payload);
+      },
+    },
+    streamDelivery: {
+      async handleRuntimeEvent() {},
+      resolveReplyTargetForRun() {
+        return {
+          userId: "user-1",
+          contextToken: "ctx-1",
+          provider: "weixin",
+        };
+      },
+    },
+    threadStateStore: {
+      snapshot() {
+        return [{ threadId: "thread-1", turnId: "turn-1", status: "running" }];
+      },
+    },
+    runtimeAdapter: {
+      getSessionStore() {
+        return {
+          findBindingForThreadId() {
+            return null;
+          },
+        };
+      },
+    },
+  });
+
+  await CyberbossApp.prototype.handleRuntimeEvent.call(appLike, {
+    type: "runtime.tool.started",
+    payload: {
+      runtimeId: "codex",
+      displayName: "shell",
+      detail: "date",
+    },
+  });
+
+  assert.equal(sent[0].text, "🔧 tool call:\nshell");
+});
+
+test("handleToolVisibilityCommand switches detail and name-only modes", async () => {
+  const sent = [];
+  let showToolCalls = false;
+  let showToolCallDetails = false;
+  const appLike = {
+    channelAdapter: {
+      setShowToolCalls(value) {
+        showToolCalls = Boolean(value);
+        return showToolCalls;
+      },
+      setShowToolCallDetails(value) {
+        showToolCallDetails = Boolean(value);
+        return showToolCallDetails;
+      },
+      async sendText(payload) {
+        sent.push(payload);
+      },
+    },
+  };
+  const normalized = {
+    senderId: "user-1",
+    contextToken: "ctx-1",
+  };
+
+  await CyberbossApp.prototype.handleToolVisibilityCommand.call(appLike, normalized, {
+    args: "detail",
+  });
+  assert.equal(showToolCalls, true);
+  assert.equal(showToolCallDetails, true);
+  assert.equal(sent.at(-1).text, "✅ Tool call notices enabled with details.");
+
+  await CyberbossApp.prototype.handleToolVisibilityCommand.call(appLike, normalized, {
+    args: "on",
+  });
+  assert.equal(showToolCalls, true);
+  assert.equal(showToolCallDetails, false);
+  assert.equal(sent.at(-1).text, "✅ Tool call notices enabled with names only.");
 });
 
 test("handleApprovalCommand sends MCP elicitation responses back through the runtime", async () => {
