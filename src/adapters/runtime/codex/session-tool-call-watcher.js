@@ -3,11 +3,11 @@ const os = require("node:os");
 const path = require("node:path");
 
 class CodexSessionToolCallWatcher {
-  constructor({ codexHome = "", pollIntervalMs = 750, onMessage = null } = {}) {
+  constructor({ codexHome = "", pollIntervalMs = 750, onEvent = null } = {}) {
     this.codexHome = normalizePath(codexHome) || path.join(os.homedir(), ".codex");
     this.sessionsRoot = path.join(this.codexHome, "sessions");
     this.pollIntervalMs = Math.max(50, Number(pollIntervalMs) || 750);
-    this.onMessage = typeof onMessage === "function" ? onMessage : () => {};
+    this.onEvent = typeof onEvent === "function" ? onEvent : () => {};
     this.watchStates = new Map();
   }
 
@@ -122,14 +122,10 @@ class CodexSessionToolCallWatcher {
     if (callKey) {
       state.seenCallIds.add(callKey);
     }
-    this.onMessage({
-      ...entry,
-      payload: {
-        ...entry.payload,
-        threadId: state.threadId,
-        thread_id: entry.payload?.thread_id || state.threadId,
-      },
-    });
+    const event = mapFunctionCallEntryToToolEvent(entry, state.threadId);
+    if (event) {
+      this.onEvent(event, entry);
+    }
   }
 
   refreshStateFile(state, { startAtEnd }) {
@@ -231,6 +227,44 @@ function buildCallKey(entry) {
     || `${normalizeText(entry.timestamp)}:${normalizeText(payload.namespace)}:${normalizeText(payload.name)}:${normalizeText(payload.arguments)}`;
 }
 
+function mapFunctionCallEntryToToolEvent(entry, threadId) {
+  const payload = entry?.payload || {};
+  const toolName = normalizeText(payload.name);
+  if (!toolName) {
+    return null;
+  }
+  const serverName = extractMcpServerName(payload.namespace);
+  return {
+    type: "runtime.tool.started",
+    payload: {
+      runtimeId: "codex",
+      threadId: normalizeText(payload.thread_id || payload.threadId) || normalizeText(threadId),
+      turnId: normalizeText(payload.turn_id || payload.turnId),
+      callId: normalizeText(payload.call_id || payload.callId),
+      toolName,
+      serverName,
+      displayName: formatToolCallDisplayName({ serverName, toolName }),
+    },
+  };
+}
+
+function extractMcpServerName(namespace) {
+  const normalized = normalizeText(namespace);
+  if (!normalized.startsWith("mcp__")) {
+    return "";
+  }
+  const parts = normalized.split("__").map((part) => part.trim()).filter(Boolean);
+  return parts[0] === "mcp" && parts[1] ? parts[1] : "";
+}
+
+function formatToolCallDisplayName({ serverName = "", toolName = "" } = {}) {
+  const normalizedToolName = normalizeText(toolName);
+  const normalizedServerName = normalizeText(serverName);
+  return normalizedServerName
+    ? `${normalizedServerName}.${normalizedToolName}`
+    : normalizedToolName;
+}
+
 function normalizePath(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -242,4 +276,5 @@ function normalizeText(value) {
 module.exports = {
   CodexSessionToolCallWatcher,
   findSessionFileForThread,
+  mapFunctionCallEntryToToolEvent,
 };

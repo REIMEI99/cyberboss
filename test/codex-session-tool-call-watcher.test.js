@@ -7,8 +7,8 @@ const path = require("node:path");
 const {
   CodexSessionToolCallWatcher,
   findSessionFileForThread,
+  mapFunctionCallEntryToToolEvent,
 } = require("../src/adapters/runtime/codex/session-tool-call-watcher");
-const { mapCodexMessageToRuntimeEvent } = require("../src/adapters/runtime/codex/events");
 
 test("codex session tool watcher emits new function calls for the active thread", async () => {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-codex-tool-watch-"));
@@ -35,12 +35,12 @@ test("codex session tool watcher emits new function calls for the active thread"
     },
   });
 
-  const messages = [];
+  const events = [];
   const watcher = new CodexSessionToolCallWatcher({
     codexHome,
     pollIntervalMs: 20,
-    onMessage(message) {
-      messages.push(message);
+    onEvent(event) {
+      events.push(event);
     },
   });
 
@@ -59,17 +59,34 @@ test("codex session tool watcher emits new function calls for the active thread"
       },
     });
 
-    await waitUntil(() => messages.length === 1);
-    assert.equal(messages[0].payload.threadId, threadId);
-    assert.equal(messages[0].payload.thread_id, threadId);
-
-    const event = mapCodexMessageToRuntimeEvent(messages[0]);
+    await waitUntil(() => events.length === 1);
+    const event = events[0];
     assert.equal(event.type, "runtime.tool.started");
     assert.equal(event.payload.threadId, threadId);
     assert.equal(event.payload.displayName, "cyberboss_tools.cyberboss_reminder_create");
   } finally {
     watcher.close();
   }
+});
+
+test("codex session function calls map to tool events inside the session watcher", () => {
+  const event = mapFunctionCallEntryToToolEvent({
+    type: "response_item",
+    payload: {
+      type: "function_call",
+      name: "cyberboss_reminder_create",
+      namespace: "mcp__cyberboss_tools__",
+      call_id: "call-1",
+    },
+  }, "thread-1");
+
+  assert.equal(event.type, "runtime.tool.started");
+  assert.equal(event.payload.runtimeId, "codex");
+  assert.equal(event.payload.threadId, "thread-1");
+  assert.equal(event.payload.serverName, "cyberboss_tools");
+  assert.equal(event.payload.toolName, "cyberboss_reminder_create");
+  assert.equal(event.payload.callId, "call-1");
+  assert.equal(event.payload.displayName, "cyberboss_tools.cyberboss_reminder_create");
 });
 
 test("codex session file lookup falls back to session metadata", () => {

@@ -86,25 +86,6 @@ test("codex MCP elicitation approvals map to runtime approval events", () => {
   });
 });
 
-test("codex function_call response items map to runtime tool events", () => {
-  const event = mapCodexMessageToRuntimeEvent({
-    type: "response_item",
-    payload: {
-      type: "function_call",
-      name: "cyberboss_reminder_create",
-      namespace: "mcp__cyberboss_tools__",
-      call_id: "call-1",
-    },
-  });
-
-  assert.equal(event.type, "runtime.tool.started");
-  assert.equal(event.payload.runtimeId, "codex");
-  assert.equal(event.payload.serverName, "cyberboss_tools");
-  assert.equal(event.payload.toolName, "cyberboss_reminder_create");
-  assert.equal(event.payload.callId, "call-1");
-  assert.equal(event.payload.displayName, "cyberboss_tools.cyberboss_reminder_create");
-});
-
 test("claudecode tool.use messages map MCP tool names to runtime tool events", () => {
   const event = mapClaudeCodeMessageToRuntimeEvent({
     type: "tool.use",

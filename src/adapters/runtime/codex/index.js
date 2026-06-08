@@ -48,14 +48,17 @@ function createCodexRuntimeAdapter(config) {
     return client;
   }
 
-  function emitRuntimeMessage(message) {
-    const event = mapCodexMessageToRuntimeEvent(message);
+  function emitRuntimeEvent(event, source = null) {
     if (!event) {
       return;
     }
     for (const listener of runtimeListeners) {
-      listener(event, message);
+      listener(event, source);
     }
+  }
+
+  function emitRuntimeMessage(message) {
+    emitRuntimeEvent(mapCodexMessageToRuntimeEvent(message), message);
   }
 
   function ensureClientEventSubscription() {
@@ -69,7 +72,7 @@ function createCodexRuntimeAdapter(config) {
     if (!toolCallWatcher) {
       toolCallWatcher = new CodexSessionToolCallWatcher({
         codexHome: config.codexHome,
-        onMessage: emitRuntimeMessage,
+        onEvent: emitRuntimeEvent,
       });
     }
     return toolCallWatcher;
