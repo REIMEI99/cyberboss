@@ -1814,7 +1814,18 @@ function buildToolCallNoticeText(payload = {}) {
   const displayName = normalizeToolCallDisplayName(
     payload?.displayName || formatToolCallDisplayName(payload)
   );
-  return displayName ? `🔧${displayName}` : "";
+  if (!displayName) {
+    return "";
+  }
+  const detail = normalizeToolCallDetail(payload?.detail || payload?.toolDetail);
+  const lines = [
+    "🔧 tool call:",
+    displayName,
+  ];
+  if (detail) {
+    lines.push(`detail: ${detail}`);
+  }
+  return lines.join("\n");
 }
 
 function formatToolCallDisplayName(payload = {}) {
@@ -1831,6 +1842,16 @@ function normalizeToolCallDisplayName(value) {
     .replace(/[\u0000-\u001f\u007f]/g, "")
     .replace(/\s+/g, " ")
     .slice(0, 160);
+}
+
+function normalizeToolCallDetail(value) {
+  return normalizeText(value)
+    .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 500);
 }
 
 function normalizeReplyTarget(target) {

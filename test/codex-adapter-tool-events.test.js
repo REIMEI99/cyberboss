@@ -102,8 +102,8 @@ test("codex adapter emits tool events from active session jsonl", async () => {
         type: "response_item",
         payload: {
           type: "function_call",
-          name: "cyberboss_reminder_create",
-          namespace: "mcp__cyberboss_tools__",
+          name: "exec_command",
+          arguments: "{\"cmd\":\"date\",\"workdir\":\"/tmp\"}",
           call_id: "call-tool",
         },
       });
@@ -111,7 +111,8 @@ test("codex adapter emits tool events from active session jsonl", async () => {
       await waitUntil(() => events.some((event) => event.type === "runtime.tool.started"));
       const toolEvent = events.find((event) => event.type === "runtime.tool.started");
       assert.equal(toolEvent.payload.threadId, threadId);
-      assert.equal(toolEvent.payload.displayName, "cyberboss_tools.cyberboss_reminder_create");
+      assert.equal(toolEvent.payload.displayName, "shell");
+      assert.equal(toolEvent.payload.detail, "date");
       assert.equal(calls.resumeThread.length, 1);
       assert.equal(calls.sendUserMessage.length, 1);
     } finally {

@@ -210,12 +210,13 @@ test("handleRuntimeEvent sends tool call notices to the active WeChat thread whe
     payload: {
       runtimeId: "codex",
       displayName: "cyberboss_tools.cyberboss_reminder_create",
+      detail: "{\"delayMinutes\":5,\"text\":\"hello\"}",
     },
   });
 
   assert.deepEqual(sent, [{
     userId: "user-1",
-    text: "🔧cyberboss_tools.cyberboss_reminder_create",
+    text: "🔧 tool call:\ncyberboss_tools.cyberboss_reminder_create\ndetail: {\"delayMinutes\":5,\"text\":\"hello\"}",
     contextToken: "ctx-1",
     preserveBlock: true,
   }]);

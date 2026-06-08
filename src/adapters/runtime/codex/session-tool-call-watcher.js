@@ -134,8 +134,8 @@ class CodexSessionToolCallWatcher {
       return;
     }
     state.filePath = filePath;
-      state.buffer = "";
-      state.reading = false;
+    state.buffer = "";
+    state.reading = false;
     try {
       const stat = fs.statSync(filePath);
       state.offset = startAtEnd ? stat.size : 0;
@@ -229,11 +229,16 @@ function buildCallKey(entry) {
 
 function mapFunctionCallEntryToToolEvent(entry, threadId) {
   const payload = entry?.payload || {};
-  const toolName = normalizeText(payload.name);
-  if (!toolName) {
+  const rawToolName = normalizeText(payload.name);
+  if (!rawToolName) {
     return null;
   }
-  const serverName = extractMcpServerName(payload.namespace);
+  const parsedArguments = parseArguments(payload.arguments);
+  const toolIdentity = resolveToolIdentity({
+    namespace: payload.namespace,
+    rawToolName,
+    parsedArguments,
+  });
   return {
     type: "runtime.tool.started",
     payload: {
@@ -241,10 +246,87 @@ function mapFunctionCallEntryToToolEvent(entry, threadId) {
       threadId: normalizeText(payload.thread_id || payload.threadId) || normalizeText(threadId),
       turnId: normalizeText(payload.turn_id || payload.turnId),
       callId: normalizeText(payload.call_id || payload.callId),
-      toolName,
-      serverName,
-      displayName: formatToolCallDisplayName({ serverName, toolName }),
+      toolName: toolIdentity.toolName,
+      rawToolName,
+      serverName: toolIdentity.serverName,
+      displayName: toolIdentity.displayName,
+      detail: formatToolCallDetail({ rawToolName, parsedArguments, rawArguments: payload.arguments }),
     },
+  };
+}
+
+function resolveToolIdentity({ namespace = "", rawToolName = "", parsedArguments = null } = {}) {
+  const namespaced = parseMcpToolName(rawToolName);
+  if (namespaced.serverName && namespaced.toolName) {
+    return {
+      serverName: namespaced.serverName,
+      toolName: namespaced.toolName,
+      displayName: formatToolCallDisplayName(namespaced),
+    };
+  }
+
+  const serverName = extractMcpServerName(namespace);
+  if (serverName) {
+    return {
+      serverName,
+      toolName: rawToolName,
+      displayName: formatToolCallDisplayName({ serverName, toolName: rawToolName }),
+    };
+  }
+
+  if (rawToolName === "exec_command") {
+    return {
+      serverName: "",
+      toolName: "shell",
+      displayName: "shell",
+    };
+  }
+
+  if (rawToolName === "write_stdin") {
+    return {
+      serverName: "",
+      toolName: "shell.input",
+      displayName: "shell.input",
+    };
+  }
+
+  if (rawToolName === "list_mcp_resources" || rawToolName === "list_mcp_resource_templates") {
+    return {
+      serverName: "codex",
+      toolName: rawToolName,
+      displayName: `codex.${rawToolName}`,
+    };
+  }
+
+  const normalizedNamespace = normalizeText(namespace);
+  if (normalizedNamespace) {
+    return {
+      serverName: normalizedNamespace,
+      toolName: rawToolName,
+      displayName: formatToolCallDisplayName({ serverName: normalizedNamespace, toolName: rawToolName }),
+    };
+  }
+
+  const commandName = normalizeText(parsedArguments?.cmd).split(/\s+/)[0];
+  return {
+    serverName: "",
+    toolName: rawToolName,
+    displayName: commandName && rawToolName === "exec_command" ? commandName : rawToolName,
+  };
+}
+
+function parseMcpToolName(toolName) {
+  const normalized = normalizeText(toolName);
+  if (!normalized.startsWith("mcp__")) {
+    return { serverName: "", toolName: "" };
+  }
+  const parts = normalized.split("__").map((part) => part.trim()).filter(Boolean);
+  if (parts.length < 3 || parts[0] !== "mcp") {
+    return { serverName: "", toolName: "" };
+  }
+  return {
+    serverName: parts[1],
+    toolName: parts.slice(2).join("__"),
   };
 }
 
@@ -265,6 +347,68 @@ function formatToolCallDisplayName({ serverName = "", toolName = "" } = {}) {
     : normalizedToolName;
 }
 
+function formatToolCallDetail({ rawToolName = "", parsedArguments = null, rawArguments = "" } = {}) {
+  if (rawToolName === "exec_command") {
+    return truncateDetail(normalizeText(parsedArguments?.cmd));
+  }
+  if (rawToolName === "write_stdin") {
+    const sessionId = normalizeText(parsedArguments?.session_id);
+    return sessionId ? `session_id: ${sessionId}` : "";
+  }
+  const redacted = redactValue(parsedArguments);
+  if (redacted && typeof redacted === "object" && !Array.isArray(redacted) && Object.keys(redacted).length === 0) {
+    return "";
+  }
+  if (redacted !== null && redacted !== undefined) {
+    return truncateDetail(JSON.stringify(redacted));
+  }
+  return truncateDetail(normalizeText(rawArguments));
+}
+
+function parseArguments(value) {
+  if (!normalizeText(value)) {
+    return null;
+  }
+  if (typeof value !== "string") {
+    return value;
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function redactValue(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => redactValue(item));
+  }
+  if (!value || typeof value !== "object") {
+    return value;
+  }
+  const redacted = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (isSensitiveKey(key)) {
+      redacted[key] = "[redacted]";
+    } else {
+      redacted[key] = redactValue(child);
+    }
+  }
+  return redacted;
+}
+
+function isSensitiveKey(key) {
+  return /token|secret|password|passwd|api[_-]?key|authorization|cookie/i.test(String(key || ""));
+}
+
+function truncateDetail(text, maxLength = 320) {
+  const normalized = normalizeText(text).replace(/\s+/g, " ");
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, maxLength - 2)}…`;
+}
+
 function normalizePath(value) {
   return typeof value === "string" ? value.trim() : "";
 }
@@ -277,4 +421,5 @@ module.exports = {
   CodexSessionToolCallWatcher,
   findSessionFileForThread,
   mapFunctionCallEntryToToolEvent,
+  resolveToolIdentity,
 };

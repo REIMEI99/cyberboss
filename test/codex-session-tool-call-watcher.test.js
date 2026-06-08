@@ -64,6 +64,7 @@ test("codex session tool watcher emits new function calls for the active thread"
     assert.equal(event.type, "runtime.tool.started");
     assert.equal(event.payload.threadId, threadId);
     assert.equal(event.payload.displayName, "cyberboss_tools.cyberboss_reminder_create");
+    assert.equal(event.payload.detail, "");
   } finally {
     watcher.close();
   }
@@ -76,6 +77,7 @@ test("codex session function calls map to tool events inside the session watcher
       type: "function_call",
       name: "cyberboss_reminder_create",
       namespace: "mcp__cyberboss_tools__",
+      arguments: "{\"delayMinutes\":5,\"text\":\"hello\"}",
       call_id: "call-1",
     },
   }, "thread-1");
@@ -87,6 +89,57 @@ test("codex session function calls map to tool events inside the session watcher
   assert.equal(event.payload.toolName, "cyberboss_reminder_create");
   assert.equal(event.payload.callId, "call-1");
   assert.equal(event.payload.displayName, "cyberboss_tools.cyberboss_reminder_create");
+  assert.equal(event.payload.detail, "{\"delayMinutes\":5,\"text\":\"hello\"}");
+});
+
+test("codex session function calls show shell commands as detail", () => {
+  const event = mapFunctionCallEntryToToolEvent({
+    type: "response_item",
+    payload: {
+      type: "function_call",
+      name: "exec_command",
+      arguments: "{\"cmd\":\"curl -I https://example.com\",\"workdir\":\"/tmp\"}",
+      call_id: "call-shell",
+    },
+  }, "thread-1");
+
+  assert.equal(event.payload.toolName, "shell");
+  assert.equal(event.payload.displayName, "shell");
+  assert.equal(event.payload.detail, "curl -I https://example.com");
+});
+
+test("codex session function calls qualify Codex resource tools", () => {
+  const event = mapFunctionCallEntryToToolEvent({
+    type: "response_item",
+    payload: {
+      type: "function_call",
+      name: "list_mcp_resources",
+      arguments: "{\"server\":\"whisper\"}",
+      call_id: "call-resource",
+    },
+  }, "thread-1");
+
+  assert.equal(event.payload.serverName, "codex");
+  assert.equal(event.payload.toolName, "list_mcp_resources");
+  assert.equal(event.payload.displayName, "codex.list_mcp_resources");
+  assert.equal(event.payload.detail, "{\"server\":\"whisper\"}");
+});
+
+test("codex session function calls parse bare MCP tool names", () => {
+  const event = mapFunctionCallEntryToToolEvent({
+    type: "response_item",
+    payload: {
+      type: "function_call",
+      name: "mcp__cyberboss_tools__whereabouts_snapshot",
+      arguments: "{\"stayLimit\":3,\"token\":\"secret-value\"}",
+      call_id: "call-mcp",
+    },
+  }, "thread-1");
+
+  assert.equal(event.payload.serverName, "cyberboss_tools");
+  assert.equal(event.payload.toolName, "whereabouts_snapshot");
+  assert.equal(event.payload.displayName, "cyberboss_tools.whereabouts_snapshot");
+  assert.equal(event.payload.detail, "{\"stayLimit\":3,\"token\":\"[redacted]\"}");
 });
 
 test("codex session file lookup falls back to session metadata", () => {
