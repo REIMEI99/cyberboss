@@ -61,6 +61,7 @@ function readConfig() {
       enabled: readOptionalBoolEnv("CYBERBOSS_ENABLE_LOCATION_SERVER"),
     }),
     syncBufferDir: path.join(stateDir, "sync-buffers"),
+    codexHome: readTextEnv("CODEX_HOME") || path.join(os.homedir(), ".codex"),
     codexEndpoint: readTextEnv("CYBERBOSS_CODEX_ENDPOINT"),
     codexCommand: readTextEnv("CYBERBOSS_CODEX_COMMAND"),
     codexModel: readTextEnv("CYBERBOSS_CODEX_MODEL"),

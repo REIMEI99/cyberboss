@@ -1,4 +1,5 @@
 const { CodexRpcClient } = require("./rpc-client");
+const { CodexSessionToolCallWatcher } = require("./session-tool-call-watcher");
 const { buildOpeningTurnText, buildInstructionRefreshText } = require("../shared-instructions");
 const { mapCodexMessageToRuntimeEvent } = require("./events");
 const {
@@ -18,6 +19,9 @@ function createCodexRuntimeAdapter(config) {
   const sessionStore = new SessionStore({ filePath: config.sessionsFile, runtimeId: "codex" });
   let client = null;
   let readyState = null;
+  let clientEventUnsubscribe = null;
+  let toolCallWatcher = null;
+  const runtimeListeners = new Set();
   const configuredModel = normalizeText(config.codexModel);
   const configuredModelProvider = normalizeText(config.codexModelProvider);
 
@@ -44,6 +48,37 @@ function createCodexRuntimeAdapter(config) {
     return client;
   }
 
+  function emitRuntimeMessage(message) {
+    const event = mapCodexMessageToRuntimeEvent(message);
+    if (!event) {
+      return;
+    }
+    for (const listener of runtimeListeners) {
+      listener(event, message);
+    }
+  }
+
+  function ensureClientEventSubscription() {
+    if (clientEventUnsubscribe) {
+      return;
+    }
+    clientEventUnsubscribe = ensureClient().onMessage(emitRuntimeMessage);
+  }
+
+  function ensureToolCallWatcher() {
+    if (!toolCallWatcher) {
+      toolCallWatcher = new CodexSessionToolCallWatcher({
+        codexHome: config.codexHome,
+        onMessage: emitRuntimeMessage,
+      });
+    }
+    return toolCallWatcher;
+  }
+
+  function watchThreadToolCalls(threadId) {
+    ensureToolCallWatcher().watchThread(threadId);
+  }
+
   return {
     describe() {
       return {
@@ -62,13 +97,15 @@ function createCodexRuntimeAdapter(config) {
       if (typeof listener !== "function") {
         return () => {};
       }
-      const runtimeClient = ensureClient();
-      return runtimeClient.onMessage((message) => {
-        const event = mapCodexMessageToRuntimeEvent(message);
-        if (event) {
-          listener(event, message);
+      runtimeListeners.add(listener);
+      ensureClientEventSubscription();
+      return () => {
+        runtimeListeners.delete(listener);
+        if (!runtimeListeners.size && clientEventUnsubscribe) {
+          clientEventUnsubscribe();
+          clientEventUnsubscribe = null;
         }
-      });
+      };
     },
     getSessionStore() {
       return sessionStore;
@@ -110,6 +147,14 @@ function createCodexRuntimeAdapter(config) {
       return readyState;
     },
     async close() {
+      if (clientEventUnsubscribe) {
+        clientEventUnsubscribe();
+        clientEventUnsubscribe = null;
+      }
+      if (toolCallWatcher) {
+        toolCallWatcher.close();
+        toolCallWatcher = null;
+      }
       if (client) {
         await client.close();
       }
@@ -145,6 +190,7 @@ function createCodexRuntimeAdapter(config) {
     async resumeThread({ threadId }) {
       const runtimeClient = ensureClient();
       await this.initialize();
+      watchThreadToolCalls(threadId);
       return runtimeClient.resumeThread({
         threadId,
         model: configuredModel,
@@ -154,6 +200,7 @@ function createCodexRuntimeAdapter(config) {
     async compactThread({ threadId }) {
       const runtimeClient = ensureClient();
       await this.initialize();
+      watchThreadToolCalls(threadId);
       return runtimeClient.compactThread({ threadId });
     },
     async refreshThreadInstructions({ threadId, workspaceRoot, model = "", modelProvider = "" }) {
@@ -161,6 +208,7 @@ function createCodexRuntimeAdapter(config) {
       await this.initialize();
       const refreshText = buildInstructionRefreshText(config);
       const desiredModel = resolveModel(model, { modelProvider });
+      watchThreadToolCalls(threadId);
       await runtimeClient.resumeThread({
         threadId,
         model: desiredModel,
@@ -237,6 +285,7 @@ function createCodexRuntimeAdapter(config) {
         });
       }
 
+      watchThreadToolCalls(threadId);
       const response = await runtimeClient.sendUserMessage({
         threadId,
         text: outboundText,
