@@ -35,6 +35,7 @@ const { ReminderQueueStore } = require("../adapters/channel/weixin/reminder-queu
 const { createAppApprovals } = require("./app-approvals");
 const { createAppBackgroundOps } = require("./app-background-ops");
 const { createAppRuntimeEvents } = require("./app-runtime-events");
+const { createAppThreadNotify } = require("./app-thread-notify");
 const {
   matchesCommandPrefix,
   canonicalizeCommandTokens,
@@ -93,6 +94,11 @@ class CyberbossApp {
     });
     this.backgroundOps = createAppBackgroundOps(this);
     this.runtimeEventOps = createAppRuntimeEvents(this);
+    this.threadNotify = createAppThreadNotify(this, {
+      normalizeReplyTarget,
+      normalizeText,
+      buildApprovalPromptText,
+    });
     this.systemMessageDispatcher = null;
     this.streamDelivery = new StreamDelivery({
       channelAdapter: this.channelAdapter,
@@ -1571,6 +1577,7 @@ class CyberbossApp {
   }
 
   async stopTypingForThread(threadId) {
+    return this.threadNotify.stopTypingForThread(threadId);
     const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(threadId);
     const target = linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null;
     if (!target) {
@@ -1584,6 +1591,7 @@ class CyberbossApp {
   }
 
   async sendFailureToThread(threadId, text, fallbackTarget = null) {
+    return this.threadNotify.sendFailureToThread(threadId, text, fallbackTarget);
     const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(threadId);
     const target = normalizeReplyTarget(
       linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null
@@ -1599,6 +1607,7 @@ class CyberbossApp {
   }
 
   async sendApprovalPrompt({ bindingKey, approval }) {
+    return this.threadNotify.sendApprovalPrompt({ bindingKey, approval });
     const target = this.resolveReplyTargetForBinding(bindingKey);
     if (!target) {
       console.warn(
