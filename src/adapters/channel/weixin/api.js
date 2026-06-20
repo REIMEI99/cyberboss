@@ -57,12 +57,17 @@ async function apiPost({ baseUrl, endpoint, token, body, timeoutMs = 0, label })
   const timer = setTimeout(() => controller.abort(), timeout + 5_000);
 
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: buildHeaders(token, body),
-      body,
-      signal: controller.signal,
-    });
+    let response;
+    try {
+      response = await fetch(url, {
+        method: "POST",
+        headers: buildHeaders(token, body),
+        body,
+        signal: controller.signal,
+      });
+    } catch (error) {
+      throw new Error(`${label} request failed for ${url}`, { cause: error });
+    }
     const raw = await response.text();
     if (Buffer.byteLength(raw, "utf8") > MAX_RESPONSE_BODY_BYTES) {
       throw new Error(`${label} response body exceeds ${MAX_RESPONSE_BODY_BYTES} bytes`);

@@ -1728,7 +1728,48 @@ function formatErrorMessage(error) {
   if (isSessionExpiredError(error)) {
     return "The WeChat session has expired. Run `npm run login` again.";
   }
-  return raw;
+  const causeSummary = summarizeErrorCauseChain(error);
+  return causeSummary ? `${raw} | ${causeSummary}` : raw;
+}
+
+function summarizeErrorCauseChain(error) {
+  const seen = new Set();
+  const parts = [];
+  let current = error;
+
+  while (current && typeof current === "object" && !seen.has(current) && parts.length < 4) {
+    seen.add(current);
+    const next = current.cause;
+    if (!(next && typeof next === "object")) {
+      break;
+    }
+    const label = formatSingleErrorCause(next);
+    if (label) {
+      parts.push(label);
+    }
+    current = next;
+  }
+
+  return parts.join(" | ");
+}
+
+function formatSingleErrorCause(error) {
+  const name = normalizeText(error?.name);
+  const code = normalizeText(error?.code);
+  const errno = normalizeText(error?.errno);
+  const syscall = normalizeText(error?.syscall);
+  const address = normalizeText(error?.address);
+  const port = error?.port != null ? String(error.port).trim() : "";
+  const message = normalizeText(error?.message);
+  const fields = [
+    name,
+    code || errno,
+    syscall,
+    address,
+    port ? `port=${port}` : "",
+    message,
+  ].filter(Boolean);
+  return fields.join(" ");
 }
 
 function sleep(ms) {
