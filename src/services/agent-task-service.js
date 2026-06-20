@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const TASK_KINDS = new Set(["explore", "research", "remember", "followup", "maintenance"]);
+const TASK_KINDS = new Set(["seed", "concern", "wish", "research", "followup", "find", "explore", "remember", "maintenance"]);
 const TASK_STATUSES = new Set(["pending", "active", "waiting", "done", "cancelled"]);
 const TASK_PRIORITIES = new Set(["low", "normal", "high"]);
 const DELIVERABLES = new Set(["silent", "message", "diary", "timeline", "briefing", "file"]);
@@ -44,7 +44,7 @@ class AgentTaskService {
       id: crypto.randomUUID(),
       kind: input.kind,
       title: input.title,
-      goal: input.goal,
+      goal: input.goal || input.notes || input.title,
       status: input.status || "pending",
       priority: input.priority || "normal",
       dueAt: input.dueAt,
@@ -57,7 +57,7 @@ class AgentTaskService {
       updatedAt: now,
     });
     if (!task) {
-      throw new Error("Invalid agent task. Provide at least kind, title, and goal.");
+      throw new Error("Invalid task seed. Provide at least a title.");
     }
     this.state.tasks.push(task);
     this.state.tasks.sort(compareTasks);
@@ -86,11 +86,11 @@ class AgentTaskService {
     this.load();
     const taskId = normalizeText(id);
     if (!taskId) {
-      throw new Error("Agent task update requires id.");
+      throw new Error("Task seed update requires id.");
     }
     const index = this.state.tasks.findIndex((task) => task.id === taskId);
     if (index < 0) {
-      throw new Error(`Agent task not found: ${taskId}`);
+      throw new Error(`Task seed not found: ${taskId}`);
     }
     const current = this.state.tasks[index];
     const next = normalizeTask({
@@ -104,7 +104,7 @@ class AgentTaskService {
       updatedAt: new Date().toISOString(),
     });
     if (!next) {
-      throw new Error("Agent task update produced an invalid task.");
+      throw new Error("Task seed update produced an invalid item.");
     }
     this.state.tasks[index] = next;
     this.state.tasks.sort(compareTasks);
@@ -126,7 +126,7 @@ function normalizeTask(value) {
     return null;
   }
   const id = normalizeText(value.id);
-  const kind = normalizeChoice(value.kind, TASK_KINDS, "followup");
+  const kind = normalizeChoice(value.kind, TASK_KINDS, "seed");
   const title = normalizeText(value.title);
   const goal = normalizeText(value.goal);
   const status = normalizeChoice(value.status, TASK_STATUSES, "pending");
@@ -139,7 +139,7 @@ function normalizeTask(value) {
   const tags = normalizeStringList(value.tags);
   const notes = normalizeText(value.notes);
 
-  if (!id || !title || !goal) {
+  if (!id || !title) {
     return null;
   }
   return {

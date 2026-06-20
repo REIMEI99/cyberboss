@@ -91,8 +91,6 @@ const DEFAULT_HIDDEN_TOOL_NAMES = new Set([
   "cyberboss_obsidian_status",
   "cyberboss_obsidian_recent",
   "cyberboss_obsidian_random_daily_excerpt",
-  "cyberboss_stone_box_search",
-  "cyberboss_stone_box_list",
   "cyberboss_system_send",
   "cyberboss_timeline_categories",
   "cyberboss_timeline_proposals",
@@ -106,7 +104,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_pulse_review",
     description: "Run the default pulse review flow in one step: inspect current context, habit status, an Obsidian signal, future material worth revisiting, and whether there is a good reason to message the user or set a follow-up reminder.",
     shortHint: "Run the default pulse review flow.",
-    topics: ["pulse", "habit", "obsidian", "task", "stone-box", "reminder"],
+    topics: ["pulse", "habit", "obsidian", "task", "reminder"],
     inputSchema: {
       type: "object",
       properties: {
@@ -115,8 +113,7 @@ const PROJECT_TOOLS = [
         userState: { type: "string", description: "Current inferred user state such as focused, low load, at home, after meal." },
         obsidianQuery: { type: "string", description: "Optional query for targeted Obsidian search. If omitted, a random daily excerpt is preferred." },
         includeObsidianExcerpt: { type: "boolean", description: "Whether to include a random daily-note excerpt when no query is provided. Defaults to true." },
-        includeTasks: { type: "boolean", description: "Whether to include active internal carry-over items. Defaults to true." },
-        includeStoneBox: { type: "boolean", description: "Whether to include active stone-box items. Defaults to true." },
+        includeTasks: { type: "boolean", description: "Whether to include active seed-like carry-over items. Defaults to true." },
         includeMemories: { type: "boolean", description: "Whether to include a few recent durable memories. Defaults to true." },
         allowResearch: { type: "boolean", description: "Reserved flag for future evolving-research integration. Defaults to false." },
       },
@@ -126,7 +123,6 @@ const PROJECT_TOOLS = [
       const turnIntent = normalizeTurnIntent(args.turnIntent);
       const includeObsidianExcerpt = args.includeObsidianExcerpt !== false;
       const includeTasks = args.includeTasks !== false;
-      const includeStoneBox = args.includeStoneBox !== false;
       const includeMemories = args.includeMemories !== false;
       const obsidianQuery = normalizeText(args.obsidianQuery);
 
@@ -162,9 +158,6 @@ const PROJECT_TOOLS = [
       const tasks = includeTasks
         ? services.agentTask.list({ limit: 5, includeDone: false })
         : { count: 0, tasks: [] };
-      const stoneBox = includeStoneBox
-        ? services.stoneBox.list({ limit: 5, includeArchived: false })
-        : { count: 0, stones: [] };
 
       const summary = buildPulseReviewSummary({
         turnIntent,
@@ -175,7 +168,6 @@ const PROJECT_TOOLS = [
         obsidian,
         memories,
         tasks,
-        stoneBox,
       });
 
       return {
@@ -190,7 +182,6 @@ const PROJECT_TOOLS = [
           obsidian,
           memories,
           tasks,
-          stoneBox,
           messageOpportunity: summary.messageOpportunity,
           followupOpportunity: summary.followupOpportunity,
           recommendedPrivateActions: summary.recommendedPrivateActions,
@@ -466,7 +457,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_research_archive",
-    description: "Archive a research topic that is no longer useful or has been converted into durable memory/task output.",
+    description: "Archive a research topic that is no longer useful or has been converted into durable memory or task-seed output.",
     shortHint: "Archive research.",
     topics: ["research"],
     inputSchema: {
@@ -488,38 +479,38 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_task_create",
-    description: "Create a structured internal carry-over item for unresolved, unexpanded, or future-useful material the agent should not lose across turns.",
-    shortHint: "Create an internal carry-over item.",
+    description: "Create a structured internal seed-like item for unresolved worries, things to learn later, future threads, or concrete finds the agent should not lose across turns.",
+    shortHint: "Create an internal seed-like item.",
     topics: ["task", "memory", "research"],
     inputSchema: {
       type: "object",
-      required: ["kind", "title", "goal"],
+      required: ["title"],
       properties: {
-        kind: { type: "string", description: "explore, research, remember, followup, or maintenance." },
-        title: { type: "string", description: "Short carry-over title." },
-        goal: { type: "string", description: "Why this item should survive and what future value it may hold." },
-        status: { type: "string", description: "pending, active, waiting, done, or cancelled. Defaults to pending." },
-        priority: { type: "string", description: "low, normal, or high. Defaults to normal." },
-        dueAt: { type: "string", description: "Optional ISO datetime for when this item may next matter." },
-        nextAction: { type: "string", description: "Optional smallest useful next step if the item becomes active later." },
-        deliverable: { type: "string", description: "silent, message, diary, timeline, briefing, or file, if this item later turns into concrete output." },
+        kind: { type: "string", description: "Optional seed type such as seed, concern, wish, research, followup, or find." },
+        title: { type: "string", description: "Short seed title." },
+        goal: { type: "string", description: "Optional why-keep field: why this item should survive and what future value it may hold." },
+        status: { type: "string", description: "Optional compatibility field: pending, active, waiting, done, or cancelled." },
+        priority: { type: "string", description: "Optional compatibility field. Usually omit unless one seed clearly deserves more attention." },
+        dueAt: { type: "string", description: "Optional compatibility field. Prefer reminder for actual time-based follow-up." },
+        nextAction: { type: "string", description: "Optional smallest useful next step if this seed later becomes actionable." },
+        deliverable: { type: "string", description: "Optional future output shape such as silent, message, diary, timeline, briefing, or file." },
         tags: { type: "array", items: { type: "string" } },
-        notes: { type: "string" },
+        notes: { type: "string", description: "Optional raw details, links, quotes, products, worries, or context that should stay attached to the seed." },
       },
       additionalProperties: false,
     },
     async handler({ services, args }) {
       const result = services.agentTask.create(args);
       return {
-        text: `Agent task created: ${result.title}`,
+        text: `Seed stored in task: ${result.title}`,
         data: result,
       };
     },
   },
   {
     name: "cyberboss_task_list",
-    description: "List structured internal carry-over items. Use this when checking what unresolved or future-useful material the agent should keep alive across turns.",
-    shortHint: "List internal carry-over items.",
+    description: "List structured internal seed-like items. Use this when checking what unresolved or future-useful material the agent should keep alive across turns.",
+    shortHint: "List internal seed-like items.",
     topics: ["task", "memory", "research"],
     inputSchema: {
       type: "object",
@@ -534,15 +525,15 @@ const PROJECT_TOOLS = [
     async handler({ services, args }) {
       const result = services.agentTask.list(args);
       return {
-        text: `Agent tasks loaded: ${result.count}.`,
+        text: `Task seeds loaded: ${result.count}.`,
         data: result,
       };
     },
   },
   {
     name: "cyberboss_task_update",
-    description: "Update a structured internal carry-over item after it becomes clearer, more relevant, or less useful.",
-    shortHint: "Update an internal carry-over item.",
+    description: "Update a structured internal seed-like item after it becomes clearer, more relevant, more concrete, or less useful.",
+    shortHint: "Update an internal seed-like item.",
     topics: ["task", "memory", "research"],
     inputSchema: {
       type: "object",
@@ -565,15 +556,15 @@ const PROJECT_TOOLS = [
     async handler({ services, args }) {
       const result = services.agentTask.update(args);
       return {
-        text: `Agent task updated: ${result.title}`,
+        text: `Task seed updated: ${result.title}`,
         data: result,
       };
     },
   },
   {
     name: "cyberboss_task_complete",
-    description: "Mark a structured internal carry-over item as resolved, exhausted, or no longer worth keeping active.",
-    shortHint: "Complete an internal carry-over item.",
+    description: "Mark a structured internal seed-like item as resolved, exhausted, or no longer worth keeping active.",
+    shortHint: "Complete an internal seed-like item.",
     topics: ["task", "memory", "research"],
     inputSchema: {
       type: "object",
@@ -587,7 +578,7 @@ const PROJECT_TOOLS = [
     async handler({ services, args }) {
       const result = services.agentTask.complete(args);
       return {
-        text: `Agent task completed: ${result.title}`,
+        text: `Task seed completed: ${result.title}`,
         data: result,
       };
     },
@@ -727,9 +718,9 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_obsidian_random_daily_excerpt",
-    description: "Pick a random short excerpt from recent Obsidian daily notes. Use this during quiet pulses for serendipitous context before deciding whether to search or add a stone-box item.",
+    description: "Pick a random short excerpt from recent Obsidian daily notes. Use this during quiet pulses for serendipitous context before deciding whether to search further or capture a task seed.",
     shortHint: "Pick a random daily-note excerpt.",
-    topics: ["obsidian", "research", "stone-box"],
+    topics: ["obsidian", "research", "task"],
     inputSchema: {
       type: "object",
       properties: {
@@ -745,108 +736,6 @@ const PROJECT_TOOLS = [
         text: result.found
           ? `Random Obsidian excerpt loaded: ${result.relativePath}.`
           : `Random Obsidian excerpt unavailable: ${result.reason || "not found"}.`,
-        data: result,
-      };
-    },
-  },
-  {
-    name: "cyberboss_stone_box_add",
-    description: "Store a serendipitous found item in the stone box. Use this for interesting search results or fragments inspired by Obsidian that should not become durable memory yet.",
-    shortHint: "Add an item to the stone box.",
-    topics: ["stone-box", "research", "obsidian"],
-    inputSchema: {
-      type: "object",
-      required: ["title", "content"],
-      properties: {
-        title: { type: "string" },
-        content: { type: "string" },
-        whyInteresting: { type: "string" },
-        source: { type: "string", description: "web_search, obsidian, article, book, video, agent, or other source label." },
-        sourceRef: { type: "string", description: "URL, note path, citation, or short provenance." },
-        obsidianRef: { type: "string", description: "The daily-note excerpt path or reference that triggered this item." },
-        status: { type: "string", description: "active, shared, or archived." },
-        tags: { type: "array", items: { type: "string" } },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = services.stoneBox.add(args);
-      return {
-        text: `Stone boxed: ${result.title}`,
-        data: result,
-      };
-    },
-  },
-  {
-    name: "cyberboss_stone_box_search",
-    description: "Search stone-box items before sharing or connecting a serendipitous finding.",
-    shortHint: "Search the stone box.",
-    topics: ["stone-box", "research"],
-    inputSchema: {
-      type: "object",
-      required: ["query"],
-      properties: {
-        query: { type: "string" },
-        limit: { type: "integer" },
-        includeArchived: { type: "boolean" },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = services.stoneBox.search(args);
-      return {
-        text: `Stone box search results: ${result.count}.`,
-        data: result,
-      };
-    },
-  },
-  {
-    name: "cyberboss_stone_box_list",
-    description: "List recent stone-box items.",
-    shortHint: "List stone-box items.",
-    topics: ["stone-box"],
-    inputSchema: {
-      type: "object",
-      properties: {
-        status: { type: "string" },
-        limit: { type: "integer" },
-        includeArchived: { type: "boolean" },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = services.stoneBox.list(args);
-      return {
-        text: `Stone box loaded: ${result.count}.`,
-        data: result,
-      };
-    },
-  },
-  {
-    name: "cyberboss_stone_box_update",
-    description: "Update or mark a stone-box item as shared or archived.",
-    shortHint: "Update a stone-box item.",
-    topics: ["stone-box"],
-    inputSchema: {
-      type: "object",
-      required: ["id"],
-      properties: {
-        id: { type: "string" },
-        title: { type: "string" },
-        content: { type: "string" },
-        whyInteresting: { type: "string" },
-        source: { type: "string" },
-        sourceRef: { type: "string" },
-        obsidianRef: { type: "string" },
-        status: { type: "string", description: "active, shared, or archived." },
-        tags: { type: "array", items: { type: "string" } },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = services.stoneBox.update(args);
-      return {
-        text: `Stone box updated: ${result.title}`,
         data: result,
       };
     },
@@ -1330,13 +1219,11 @@ function buildPulseReviewSummary({
   obsidian,
   memories,
   tasks,
-  stoneBox,
 }) {
   const incompleteHabits = Array.isArray(habitStatus?.habits)
     ? habitStatus.habits.filter((item) => item?.dailyState === "incomplete")
     : [];
   const openTasks = Array.isArray(tasks?.tasks) ? tasks.tasks : [];
-  const activeStones = Array.isArray(stoneBox?.stones) ? stoneBox.stones : [];
   const durableMemories = Array.isArray(memories?.memories) ? memories.memories : [];
 
   const currentContextSummary = {
@@ -1345,7 +1232,6 @@ function buildPulseReviewSummary({
     userState: normalizeText(userState),
     incompleteHabitCount: incompleteHabits.length,
     openTaskCount: openTasks.length,
-    activeStoneCount: activeStones.length,
     memoryCount: durableMemories.length,
     obsidianSource: normalizeText(obsidian?.source) || "none",
     obsidianFound: detectObsidianSignal(obsidian),
@@ -1401,9 +1287,6 @@ function buildPulseReviewSummary({
   }
   if (openTasks.length) {
     recommendedPrivateActions.push("review whether one internal carry-over item should be clarified, preserved, or quietly advanced");
-  }
-  if (activeStones.length) {
-    recommendedPrivateActions.push("check whether a recent stone-box item should be connected to current context");
   }
   if (!recommendedPrivateActions.length) {
     recommendedPrivateActions.push("stay silent and wait for a better trigger");

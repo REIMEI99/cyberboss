@@ -1691,7 +1691,6 @@ function captureSideEffectSnapshot(config) {
     config?.agentTaskFile,
     config?.agentMemoryFile,
     config?.agentResearchFile,
-    config?.agentStoneBoxFile,
     config?.habitDefinitionsFile,
     config?.habitEventsFile,
     config?.habitStateFile,

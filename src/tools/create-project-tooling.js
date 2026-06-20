@@ -11,7 +11,6 @@ const { HabitService } = require("../habit/habit-service");
 const { ObsidianService } = require("../services/obsidian-service");
 const { ReminderService } = require("../services/reminder-service");
 const { StickerService } = require("../services/sticker-service");
-const { StoneBoxService } = require("../services/stone-box-service");
 const { SystemMessageService } = require("../services/system-message-service");
 const { TimelineService } = require("../services/timeline-service");
 const { RuntimeContextStore } = require("./runtime-context-store");
@@ -39,7 +38,6 @@ function createProjectTooling(config, options = {}) {
     habitProvider: new HabitProvider({ habitService: habit }),
     obsidian: new ObsidianService({ config }),
     reminder: new ReminderService({ config, sessionStore }),
-    stoneBox: new StoneBoxService({ config }),
     system: new SystemMessageService({ config, sessionStore }),
     channelFile,
     sticker: new StickerService({ config, channelAdapter, sessionStore, channelFileService: channelFile }),

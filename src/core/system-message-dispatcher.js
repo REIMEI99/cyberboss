@@ -60,7 +60,7 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse" } =
       ? "This is a due reminder. Act on it now. Do not treat it as optional."
       : "This is a pulse-like trigger. Review context, decide whether to contact the user, and decide follow-up.",
     "Default first step: use cyberboss_pulse_review unless the trigger already gives you enough context.",
-    "Read the situation in this order: context, today's habit state, Obsidian signal, carry-over material, whether user contact is useful now, and whether later follow-up should become a reminder.",
+    "Read the situation in this order: context, today's habit state, Obsidian signal, seed-like carry-over material, whether user contact is useful now, and whether later follow-up should become a reminder.",
     "Reminder is the default follow-up substrate. If an open loop may matter later, either create a reminder or conclude clearly that no reminder is needed.",
     "Habit closure matters. If a habit is still incomplete today, either nudge now or set a reminder to check later. If the user already confirmed completion or clean abandonment, prefer writing the habit state.",
     "If you return silent, that should follow useful private work or a clear judgment that nothing useful should be done now.",

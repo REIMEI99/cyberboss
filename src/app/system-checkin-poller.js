@@ -7,7 +7,7 @@ const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("../
 const { SystemMessageQueueStore } = require("../core/system-message-queue-store");
 const { ObsidianService } = require("../services/obsidian-service");
 
-const INTERNAL_CHECKIN_TRIGGER_TEMPLATE = "A quiet pulse fires. First review %USER%'s current context and decide whether contact is useful now: if you do not know her situation, have finished research or stone-box finds not yet discussed, a habit genuinely fits the current scene, or she seems stalled and a small intervention would help, consider a short message. If a habit is still incomplete but the timing is not right for contact, set yourself a reminder to check again later. If you decide not to contact her, you still must do one small private action: inspect context, review habits/tasks if relevant, continue or start research when justified, update stone box, remember what matters, prepare a private note, or maintain diary/timeline.";
+const INTERNAL_CHECKIN_TRIGGER_TEMPLATE = "A quiet pulse fires. First review %USER%'s current context and decide whether contact is useful now: if you do not know her situation, have finished research or seed-like findings not yet discussed, a habit genuinely fits the current scene, or she seems stalled and a small intervention would help, consider a short message. If a habit is still incomplete but the timing is not right for contact, set yourself a reminder to check again later. If you decide not to contact her, you still must do one small private action: inspect context, review habits/tasks if relevant, continue or start research when justified, capture or refine a seed-like item, remember what matters, prepare a private note, or maintain diary/timeline.";
 const CHECKIN_SYSTEM_MESSAGE_SOURCE = "checkin";
 const CHECKIN_SYSTEM_MESSAGE_TTL_MS = 30 * 60 * 1000;
 
@@ -148,7 +148,7 @@ function buildCheckinTrigger(config, { obsidianExcerpt = null } = {}) {
     `Source: ${obsidianExcerpt.relativePath || ""}`,
     obsidianExcerpt.excerpt,
     "",
-    "Use this fragment only as a spark. If it points to a searchable interest, seed, object, place, media, product, or question, you may investigate and put the finding in the stone box. If it is private reflection or work/psychological context, use it only for judgment and do not force a search.",
+    "Use this fragment only as a spark. If it points to a searchable interest, seed, object, place, media, product, or question, you may investigate and capture the finding as a task seed. If it is private reflection or work/psychological context, use it only for judgment and do not force a search.",
   ].join("\n").trim();
 }
 
