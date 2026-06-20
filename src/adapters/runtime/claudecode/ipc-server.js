@@ -7,10 +7,13 @@ const { EventEmitter } = require("events");
 class ClaudeCodeIpcServer extends EventEmitter {
   constructor({ socketPath }) {
     super();
-    this.socketPath = socketPath;
-    this.tokenFile = `${socketPath}.token`;
+    // socketPath is kept for backward compatibility with callers,
+    // but we derive port/token files from it.
+    this.portFile = socketPath.replace(/\.sock$/, ".port");
+    this.tokenFile = socketPath.replace(/\.sock$/, ".token");
     this.authToken = "";
     this.server = null;
+    this.port = 0;
     this.clients = new Set();
     this.authenticated = new Set();
   }
@@ -18,7 +21,7 @@ class ClaudeCodeIpcServer extends EventEmitter {
   start() {
     if (this.server) return;
     this.ensureDirectory();
-    this.removeStaleSocket();
+    this.removeStalePortFile();
     this.generateAuthToken();
 
     this.server = net.createServer((socket) => {
@@ -60,8 +63,14 @@ class ClaudeCodeIpcServer extends EventEmitter {
       });
     });
 
-    this.server.listen(this.socketPath, () => {
-      fs.chmodSync(this.socketPath, 0o600);
+    this.server.listen(0, "127.0.0.1", () => {
+      const address = this.server.address();
+      this.port = address.port;
+      try {
+        fs.writeFileSync(this.portFile, String(this.port), { mode: 0o600 });
+      } catch {
+        // ignore
+      }
     });
   }
 
@@ -77,17 +86,13 @@ class ClaudeCodeIpcServer extends EventEmitter {
   }
 
   ensureDirectory() {
-    const dir = path.dirname(this.socketPath);
+    const dir = path.dirname(this.portFile);
     fs.mkdirSync(dir, { recursive: true });
   }
 
-  removeStaleSocket() {
+  removeStalePortFile() {
     try {
-      const stat = fs.lstatSync(this.socketPath);
-      if (!stat.isSocket()) {
-        return;
-      }
-      fs.unlinkSync(this.socketPath);
+      fs.unlinkSync(this.portFile);
     } catch {
       // ignore
     }
@@ -128,7 +133,7 @@ class ClaudeCodeIpcServer extends EventEmitter {
       this.server = null;
     }
 
-    this.removeStaleSocket();
+    this.removeStalePortFile();
     this.removeAuthToken();
   }
 }

@@ -16,9 +16,91 @@ function createHost() {
           return { id: "reminder-1", ...args };
         },
       },
+      agentResearch: {
+        upsert(args) {
+          return { id: args.id || "research-1", topic: args.topic, notes: args.notes || [] };
+        },
+        search(args) {
+          return { count: 1, query: args.query, research: [{ id: "research-1", topic: "retail research" }] };
+        },
+        list(args) {
+          return { count: 1, research: [{ id: "research-1", topic: args.topic || "retail research" }] };
+        },
+        archive(args) {
+          return { id: args.id, topic: "retail research", status: "archived" };
+        },
+      },
       system: {
         queueMessage(args) {
           return { id: "system-1", ...args };
+        },
+      },
+      habit: {
+        upsertDefinition(args) {
+          return { id: args.id || "habit-1", title: args.title };
+        },
+        listDefinitions() {
+          return { count: 1, habits: [{ id: "habit-1", title: "Eat supplements" }] };
+        },
+        statusToday() {
+          return { date: "2026-06-19", count: 1, habits: [{ habit: { id: "habit-1" }, dailyState: "incomplete", completedToday: false }] };
+        },
+        markDone(args) {
+          return { id: "event-1", habitId: args.habitId, type: "done" };
+        },
+        markIncomplete(args) {
+          return { id: "event-2", habitId: args.habitId, type: "incomplete" };
+        },
+        markAbandoned(args) {
+          return { id: "event-3", habitId: args.habitId, type: "abandoned" };
+        },
+        markSkipped(args) {
+          return { id: "event-4", habitId: args.habitId, type: "abandoned" };
+        },
+        logEvent(args) {
+          return { id: "event-5", habitId: args.habitId, type: args.type };
+        },
+        suggestNextAction() {
+          return {
+            shouldContactUser: true,
+            reason: "not completed today",
+            suggestions: [{ habitId: "habit-1", title: "Eat supplements" }],
+          };
+        },
+      },
+      obsidian: {
+        getStatus() {
+          return { configured: true, exists: true, vaultRoot: "/vault" };
+        },
+        search() {
+          return { resultCount: 0, results: [] };
+        },
+        recent() {
+          return { resultCount: 0, results: [] };
+        },
+        read(args) {
+          return { relativePath: args.relativePath, truncated: false, text: "note" };
+        },
+        randomDailyExcerpt() {
+          return {
+            found: true,
+            relativePath: "Daily note/2026-06-19.md",
+            excerpt: "A tiny interesting fragment.",
+          };
+        },
+      },
+      stoneBox: {
+        add(args) {
+          return { id: "stone-1", ...args };
+        },
+        search(args) {
+          return { count: 1, query: args.query, stones: [{ id: "stone-1", title: "Stone" }] };
+        },
+        list() {
+          return { count: 1, stones: [{ id: "stone-1", title: "Stone" }] };
+        },
+        update(args) {
+          return { id: args.id, title: "Stone", status: args.status || "active" };
         },
       },
       channelFile: {
@@ -220,6 +302,88 @@ test("tool host exposes structured timeline read tools", async () => {
   assert.equal(readResult.text, "Timeline day 2026-04-21: 1 events.");
   assert.equal(categoriesResult.text, "Timeline categories loaded: 2.");
   assert.equal(proposalsResult.text, "Timeline proposals loaded: 1.");
+});
+
+test("tool host exposes dedicated research tools", async () => {
+  const host = createHost();
+  const upsertResult = await host.invokeTool("cyberboss_research_upsert", {
+    topic: "retail research",
+    notes: ["Temporary viewpoint that may change."],
+  }, {});
+  const searchResult = await host.invokeTool("cyberboss_research_search", {
+    query: "retail",
+  }, {});
+  const listResult = await host.invokeTool("cyberboss_research_list", {}, {});
+  const archiveResult = await host.invokeTool("cyberboss_research_archive", {
+    id: "research-1",
+  }, {});
+
+  assert.equal(upsertResult.text, "Research updated: retail research");
+  assert.equal(searchResult.text, "Research search results: 1.");
+  assert.equal(listResult.text, "Research topics loaded: 1.");
+  assert.equal(archiveResult.text, "Research archived: retail research");
+});
+
+test("tool host exposes habit tools", async () => {
+  const host = createHost();
+  const upsertResult = await host.invokeTool("cyberboss_habit_upsert", {
+    title: "Eat supplements",
+    contexts: ["at_home"],
+  }, {});
+  const listResult = await host.invokeTool("cyberboss_habit_list", {}, {});
+  const statusResult = await host.invokeTool("cyberboss_habit_status_today", {}, {});
+  const doneResult = await host.invokeTool("cyberboss_habit_mark_done", {
+    habitId: "habit-1",
+  }, {});
+  const incompleteResult = await host.invokeTool("cyberboss_habit_mark_incomplete", {
+    habitId: "habit-1",
+  }, {});
+  const abandonedResult = await host.invokeTool("cyberboss_habit_mark_abandoned", {
+    habitId: "habit-1",
+  }, {});
+  const skippedResult = await host.invokeTool("cyberboss_habit_mark_skipped", {
+    habitId: "habit-1",
+  }, {});
+  const eventResult = await host.invokeTool("cyberboss_habit_log_event", {
+    habitId: "habit-1",
+    type: "nudged",
+  }, {});
+  const suggestResult = await host.invokeTool("cyberboss_habit_suggest_next_action", {
+    context: "lunch at_home",
+  }, {});
+
+  assert.equal(upsertResult.text, "Habit saved: Eat supplements");
+  assert.equal(listResult.text, "Habits loaded: 1.");
+  assert.equal(statusResult.text, "Habit status 2026-06-19: 1.");
+  assert.equal(doneResult.text, "Habit done: habit-1");
+  assert.equal(incompleteResult.text, "Habit incomplete: habit-1");
+  assert.equal(abandonedResult.text, "Habit abandoned: habit-1");
+  assert.equal(skippedResult.text, "Habit skipped: habit-1");
+  assert.equal(eventResult.text, "Habit event logged: nudged");
+  assert.equal(suggestResult.text, "Habit nudge opportunity found.");
+});
+
+test("tool host exposes Obsidian random excerpt and stone box tools", async () => {
+  const host = createHost();
+  const excerptResult = await host.invokeTool("cyberboss_obsidian_random_daily_excerpt", {}, {});
+  const addResult = await host.invokeTool("cyberboss_stone_box_add", {
+    title: "Interesting find",
+    content: "A found thing worth keeping nearby.",
+  }, {});
+  const searchResult = await host.invokeTool("cyberboss_stone_box_search", {
+    query: "interesting",
+  }, {});
+  const listResult = await host.invokeTool("cyberboss_stone_box_list", {}, {});
+  const updateResult = await host.invokeTool("cyberboss_stone_box_update", {
+    id: "stone-1",
+    status: "shared",
+  }, {});
+
+  assert.equal(excerptResult.text, "Random Obsidian excerpt loaded: Daily note/2026-06-19.md.");
+  assert.equal(addResult.text, "Stone boxed: Interesting find");
+  assert.equal(searchResult.text, "Stone box search results: 1.");
+  assert.equal(listResult.text, "Stone box loaded: 1.");
+  assert.equal(updateResult.text, "Stone box updated: Stone");
 });
 
 test("tool host validates structured reminder input types", async () => {

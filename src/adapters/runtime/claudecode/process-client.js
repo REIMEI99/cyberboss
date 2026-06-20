@@ -67,7 +67,7 @@ class ClaudeCodeProcessClient {
       cwd: this.cwd,
       env: this.env,
       stdio: ["pipe", "pipe", "pipe"],
-      shell: false,
+      shell: process.platform === "win32",
     });
     this.child = child;
     this.stdin = child.stdin;

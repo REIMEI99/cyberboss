@@ -28,6 +28,7 @@ const logDir = path.join(stateDir, "logs");
 const appServerPidFile = path.join(logDir, "shared-app-server.pid");
 const bridgePidFile = path.join(logDir, "shared-wechat.pid");
 const appServerLogFile = path.join(logDir, "shared-app-server.log");
+const bridgeLogFile = path.join(logDir, "shared-wechat.log");
 const accountsDir = path.join(stateDir, "accounts");
 const sessionFile = process.env.CYBERBOSS_SESSIONS_FILE || path.join(stateDir, "sessions.json");
 
@@ -113,7 +114,8 @@ function spawnDetachedCommand(command, args, { logFile, cwd = rootDir, env = {} 
     env: { ...process.env, ...env },
     detached: true,
     stdio: ["ignore", stdoutFd, stderrFd],
-    shell: process.platform === "win32",
+    shell: false,
+    windowsHide: true,
   });
   child.unref();
   return child.pid;
@@ -156,7 +158,7 @@ async function ensureSharedAppServer() {
   });
   writePidFile(appServerPidFile, pid);
 
-  const ready = await waitForReadyz();
+  const ready = await waitForReadyz({ attempts: 40, delayMs: 500 });
   if (!ready) {
     throw new Error(`failed to start shared app-server; check ${appServerLogFile}`);
   }
@@ -274,6 +276,7 @@ module.exports = {
   appServerPidFile,
   bridgePidFile,
   appServerLogFile,
+  bridgeLogFile,
   ensureLogDir,
   isPidAlive,
   readPidFile,

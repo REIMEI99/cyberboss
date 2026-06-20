@@ -18,10 +18,13 @@ function ensureDefaultStateDirectory() {
 
 function loadEnv() {
   ensureDefaultStateDirectory();
+  const repoRoot = path.resolve(__dirname, "..");
   const candidates = [
     path.join(process.cwd(), ".env"),
+    path.join(repoRoot, ".env"),
+    process.env.CYBERBOSS_HOME ? path.join(process.env.CYBERBOSS_HOME, ".env") : "",
     path.join(os.homedir(), ".cyberboss", ".env"),
-  ];
+  ].filter(Boolean);
   for (const envPath of candidates) {
     if (!fs.existsSync(envPath)) {
       continue;

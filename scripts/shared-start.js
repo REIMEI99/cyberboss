@@ -1,8 +1,10 @@
 const { spawn } = require("child_process");
+const fs = require("fs");
 const {
   rootDir,
   listenUrl,
   bridgePidFile,
+  bridgeLogFile,
   writePidFile,
   removePidFileIfMatches,
   ensureSharedAppServer,
@@ -32,11 +34,16 @@ async function main() {
     childEnv.CYBERBOSS_CODEX_ENDPOINT = listenUrl;
   }
 
+  const bridgeLogStream = fs.createWriteStream(bridgeLogFile, { flags: "a" });
   const child = spawn(process.execPath, ["./bin/cyberboss.js", "start", "--checkin"], {
     cwd: rootDir,
     env: childEnv,
-    stdio: "inherit",
+    stdio: ["inherit", "pipe", "pipe"],
   });
+  child.stdout.pipe(process.stdout);
+  child.stdout.pipe(bridgeLogStream, { end: false });
+  child.stderr.pipe(process.stderr);
+  child.stderr.pipe(bridgeLogStream, { end: false });
 
   writePidFile(bridgePidFile, child.pid);
   const cleanup = () => removePidFileIfMatches(bridgePidFile, child.pid);
@@ -50,6 +57,7 @@ async function main() {
 
   child.on("exit", (code, signal) => {
     cleanup();
+    bridgeLogStream.end();
     if (signal) {
       process.kill(process.pid, signal);
       return;

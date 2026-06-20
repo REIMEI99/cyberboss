@@ -5,12 +5,16 @@ const { SessionStore } = require("../adapters/runtime/codex/session-store");
 const { CheckinConfigStore, resolveDefaultCheckinRange } = require("../core/checkin-config-store");
 const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("../core/default-targets");
 const { SystemMessageQueueStore } = require("../core/system-message-queue-store");
+const { ObsidianService } = require("../services/obsidian-service");
 
-const INTERNAL_CHECKIN_TRIGGER_TEMPLATE = "%USER% comes to mind again.";
+const INTERNAL_CHECKIN_TRIGGER_TEMPLATE = "A quiet pulse fires. First decide whether to contact %USER% now: if you do not know her situation, have finished research or stone-box finds not yet discussed, a habit has a good contextual opening, or she does not seem deeply focused on work, consider a short message. If you decide not to contact her, you still must do one small private action: inspect habits/tasks/research, continue or start research, explore context, update stone box, remember what matters, prepare a private note, or maintain diary/timeline.";
+const CHECKIN_SYSTEM_MESSAGE_SOURCE = "checkin";
+const CHECKIN_SYSTEM_MESSAGE_TTL_MS = 30 * 60 * 1000;
 
 async function runSystemCheckinPoller(config) {
   const account = resolveSelectedAccount(config);
   const queue = new SystemMessageQueueStore({ filePath: config.systemMessageQueueFile });
+  const obsidian = new ObsidianService({ config });
   const checkinConfigStore = new CheckinConfigStore({ filePath: config.checkinConfigFile });
   const sessionStore = new SessionStore({ filePath: config.sessionsFile });
   const target = resolvePollerTarget({ config, account, sessionStore });
@@ -27,6 +31,21 @@ async function runSystemCheckinPoller(config) {
     console.log(`[cyberboss] next checkin in ${Math.round(delayMs / 60000)}m at ${wakeAt}`);
     await sleep(delayMs);
 
+    const nowMs = Date.now();
+    const baseCheckinTrigger = buildCheckinTrigger(config);
+    const checkinTrigger = buildCheckinTrigger(config, {
+      obsidianExcerpt: loadRandomObsidianExcerpt(obsidian),
+    });
+    const pruned = queue.pruneStaleForAccount(account.accountId, {
+      source: CHECKIN_SYSTEM_MESSAGE_SOURCE,
+      legacyText: baseCheckinTrigger,
+      maxAgeMs: CHECKIN_SYSTEM_MESSAGE_TTL_MS,
+      nowMs,
+    });
+    if (pruned) {
+      console.log(`[cyberboss] checkin expired stale pending message count=${pruned}`);
+    }
+
     if (queue.hasPendingForAccount(account.accountId)) {
       console.log("[cyberboss] checkin skipped: pending system message still in queue");
       continue;
@@ -37,8 +56,10 @@ async function runSystemCheckinPoller(config) {
       accountId: account.accountId,
       senderId: target.senderId,
       workspaceRoot: target.workspaceRoot,
-      text: buildCheckinTrigger(config),
-      createdAt: new Date().toISOString(),
+      text: checkinTrigger,
+      source: CHECKIN_SYSTEM_MESSAGE_SOURCE,
+      createdAt: new Date(nowMs).toISOString(),
+      expiresAt: new Date(nowMs + CHECKIN_SYSTEM_MESSAGE_TTL_MS).toISOString(),
     });
     console.log(`[cyberboss] checkin queued id=${queued.id}`);
   }
@@ -105,9 +126,30 @@ function formatRangeMinutes(range) {
   return `${Math.round(range.minIntervalMs / 60000)}m-${Math.round(range.maxIntervalMs / 60000)}m`;
 }
 
-function buildCheckinTrigger(config) {
+function loadRandomObsidianExcerpt(obsidian) {
+  try {
+    const result = obsidian.randomDailyExcerpt({ daysBack: 45, maxChars: 700 });
+    return result?.found ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+function buildCheckinTrigger(config, { obsidianExcerpt = null } = {}) {
   const userName = normalizeText(config?.userName) || "the user";
-  return INTERNAL_CHECKIN_TRIGGER_TEMPLATE.replace("%USER%", userName);
+  const trigger = INTERNAL_CHECKIN_TRIGGER_TEMPLATE.replace("%USER%", userName);
+  if (!obsidianExcerpt?.excerpt) {
+    return trigger;
+  }
+  return [
+    trigger,
+    "",
+    "Random Obsidian daily-note fragment:",
+    `Source: ${obsidianExcerpt.relativePath || ""}`,
+    obsidianExcerpt.excerpt,
+    "",
+    "Use this fragment only as a spark. If it points to a searchable interest, seed, object, place, media, product, or question, you may investigate and put the finding in the stone box. If it is private reflection or work/psychological context, use it only for judgment and do not force a search.",
+  ].join("\n").trim();
 }
 
 module.exports = { runSystemCheckinPoller };

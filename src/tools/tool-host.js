@@ -69,6 +69,557 @@ function listProjectToolNames() {
 
 const PROJECT_TOOLS = [
   {
+    name: "cyberboss_memory_remember",
+    description: "Store a long-term structured memory that should influence future judgment. Do not use this for diary-like logs, tiny one-off details, or evolving research notes; use cyberboss_research_upsert for research.",
+    shortHint: "Store a long-term memory.",
+    topics: ["memory", "task"],
+    inputSchema: {
+      type: "object",
+      required: ["type", "subject", "content"],
+      properties: {
+        type: { type: "string", description: "preference, fact, principle, relationship, project, or self. Legacy research is accepted, but new research belongs in cyberboss_research_upsert." },
+        subject: { type: "string", description: "Who or what this memory is about." },
+        content: { type: "string", description: "The durable fact, preference, principle, or finding." },
+        confidence: { type: "number", description: "0 to 1. Defaults to 0.5." },
+        source: { type: "string", description: "wechat, obsidian, diary, timeline, agent_life, research, or other source label." },
+        sourceRef: { type: "string", description: "Optional note path, task id, life event id, URL, or short provenance." },
+        expiresAt: { type: "string", description: "Optional ISO datetime after which the memory should stop applying." },
+        tags: { type: "array", items: { type: "string" } },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentMemory.remember(args);
+      return {
+        text: `Memory stored: ${result.subject}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_memory_search",
+    description: "Search long-term structured memories before making a judgment that may depend on durable user preferences, facts, projects, or relationship context.",
+    shortHint: "Search long-term memories.",
+    topics: ["memory", "task"],
+    inputSchema: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        query: { type: "string" },
+        limit: { type: "integer" },
+        includeArchived: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentMemory.search(args);
+      return {
+        text: `Memory search results: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_memory_list",
+    description: "List long-term structured memories, optionally filtered by type or subject.",
+    shortHint: "List long-term memories.",
+    topics: ["memory"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        type: { type: "string" },
+        subject: { type: "string" },
+        includeArchived: { type: "boolean" },
+        limit: { type: "integer" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentMemory.list(args);
+      return {
+        text: `Memories loaded: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_memory_update",
+    description: "Update a long-term structured memory when it has become more precise, less reliable, expired, or needs better tags.",
+    shortHint: "Update a memory.",
+    topics: ["memory"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string" },
+        type: { type: "string" },
+        subject: { type: "string" },
+        content: { type: "string" },
+        status: { type: "string", description: "active or archived." },
+        confidence: { type: "number" },
+        source: { type: "string" },
+        sourceRef: { type: "string" },
+        expiresAt: { type: "string" },
+        tags: { type: "array", items: { type: "string" } },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentMemory.update(args);
+      return {
+        text: `Memory updated: ${result.subject}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_memory_forget",
+    description: "Archive a long-term structured memory so it no longer influences future judgment.",
+    shortHint: "Archive a memory.",
+    topics: ["memory"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string" },
+        reason: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentMemory.forget(args);
+      return {
+        text: `Memory archived: ${result.subject}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_research_upsert",
+    description: "Create or update an evolving research topic in a dedicated research file. Use this for temporary hypotheses, changing opinions, source notes, open questions, and synthesis instead of long-term memory.",
+    shortHint: "Create or update research notes.",
+    topics: ["research", "task", "memory"],
+    inputSchema: {
+      type: "object",
+      required: ["topic"],
+      properties: {
+        id: { type: "string", description: "Existing research id. If omitted, an active item with the same topic is updated or a new one is created." },
+        topic: { type: "string", description: "Research topic or question." },
+        title: { type: "string", description: "Optional short display title." },
+        status: { type: "string", description: "active, exploring, parked, synthesized, or archived." },
+        hypothesis: { type: "string", description: "Current working hypothesis or viewpoint." },
+        synthesis: { type: "string", description: "Current synthesized judgment. Revise it as the conversation develops." },
+        notes: { type: "array", items: { type: "string" }, description: "Append temporary notes or observations." },
+        evidence: { type: "array", items: { type: "string" }, description: "Append source snippets, URLs, facts, or provenance notes." },
+        openQuestions: { type: "array", items: { type: "string" }, description: "Append questions the agent should investigate later." },
+        nextAction: { type: "string", description: "Smallest useful next research action for a future pulse." },
+        confidence: { type: "number", description: "0 to 1. Defaults to 0.5." },
+        source: { type: "string", description: "wechat, web_search, obsidian, agent, or other source label." },
+        sourceRef: { type: "string", description: "Optional URL, note path, message time, or short provenance." },
+        taskId: { type: "string", description: "Optional related cyberboss task id." },
+        tags: { type: "array", items: { type: "string" } },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentResearch.upsert(args);
+      return {
+        text: `Research updated: ${result.topic}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_research_search",
+    description: "Search dedicated evolving research notes before starting or continuing investigation.",
+    shortHint: "Search research notes.",
+    topics: ["research", "task"],
+    inputSchema: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        query: { type: "string" },
+        limit: { type: "integer" },
+        includeArchived: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentResearch.search(args);
+      return {
+        text: `Research search results: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_research_list",
+    description: "List active research topics. Use during pulse/check-in to decide which investigation to advance before choosing silent.",
+    shortHint: "List research topics.",
+    topics: ["research", "task"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Optional status filter." },
+        topic: { type: "string", description: "Optional topic filter." },
+        limit: { type: "integer" },
+        includeArchived: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentResearch.list(args);
+      return {
+        text: `Research topics loaded: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_research_archive",
+    description: "Archive a research topic that is no longer useful or has been converted into durable memory/task output.",
+    shortHint: "Archive research.",
+    topics: ["research"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string" },
+        reason: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentResearch.archive(args);
+      return {
+        text: `Research archived: ${result.topic}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_task_create",
+    description: "Create a structured internal agent task for autonomous exploration, research, memory, follow-up, or maintenance.",
+    shortHint: "Create an internal agent task.",
+    topics: ["task", "memory", "research"],
+    inputSchema: {
+      type: "object",
+      required: ["kind", "title", "goal"],
+      properties: {
+        kind: { type: "string", description: "explore, research, remember, followup, or maintenance." },
+        title: { type: "string", description: "Short task title." },
+        goal: { type: "string", description: "What this task is trying to accomplish." },
+        status: { type: "string", description: "pending, active, waiting, done, or cancelled. Defaults to pending." },
+        priority: { type: "string", description: "low, normal, or high. Defaults to normal." },
+        dueAt: { type: "string", description: "Optional ISO datetime for when this task should next matter." },
+        nextAction: { type: "string", description: "The smallest useful next action." },
+        deliverable: { type: "string", description: "silent, message, diary, timeline, briefing, or file." },
+        tags: { type: "array", items: { type: "string" } },
+        notes: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentTask.create(args);
+      return {
+        text: `Agent task created: ${result.title}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_task_list",
+    description: "List structured internal agent tasks. Use this during pulse/check-in before deciding what autonomous action to take.",
+    shortHint: "List internal agent tasks.",
+    topics: ["task", "memory", "research"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string", description: "Optional status filter." },
+        kind: { type: "string", description: "Optional kind filter." },
+        limit: { type: "integer", description: "Optional maximum task count." },
+        includeDone: { type: "boolean", description: "Whether to include done/cancelled tasks." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentTask.list(args);
+      return {
+        text: `Agent tasks loaded: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_task_update",
+    description: "Update a structured internal agent task after making progress or changing the next action.",
+    shortHint: "Update an internal agent task.",
+    topics: ["task", "memory", "research"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string" },
+        kind: { type: "string" },
+        title: { type: "string" },
+        goal: { type: "string" },
+        status: { type: "string", description: "pending, active, waiting, done, or cancelled." },
+        priority: { type: "string", description: "low, normal, or high." },
+        dueAt: { type: "string" },
+        nextAction: { type: "string" },
+        deliverable: { type: "string", description: "silent, message, diary, timeline, briefing, or file." },
+        tags: { type: "array", items: { type: "string" } },
+        notes: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentTask.update(args);
+      return {
+        text: `Agent task updated: ${result.title}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_task_complete",
+    description: "Mark a structured internal agent task as done.",
+    shortHint: "Complete an internal agent task.",
+    topics: ["task", "memory", "research"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string" },
+        notes: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentTask.complete(args);
+      return {
+        text: `Agent task completed: ${result.title}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_habit_upsert",
+    description: "Create or update a long-running habit definition. Habits are contextual recurring rhythms, not fixed repeated reminders.",
+    shortHint: "Create or update a habit.",
+    topics: ["habit", "reminder", "task"],
+    inputSchema: {
+      type: "object",
+      required: ["title"],
+      properties: {
+        id: { type: "string", description: "Stable habit id. Defaults to a slug from title." },
+        title: { type: "string" },
+        cadence: { type: "string", description: "Currently daily." },
+        status: { type: "string", description: "active, paused, or archived." },
+        preferredWindows: { type: "array", items: { type: "string" }, description: "Context windows like lunch, before_sleep, morning." },
+        contexts: { type: "array", items: { type: "string" }, description: "Useful contexts such as at_home, after_meal, low_cognitive_load." },
+        avoidContexts: { type: "array", items: { type: "string" }, description: "Contexts where nudges should be avoided, such as deep_work or emotionally_overloaded." },
+        promptStyle: { type: "string", description: "Reminder style guidance, e.g. gentle_varied." },
+        cooldownMinutes: { type: "integer", description: "Minimum minutes between nudges. Defaults to 180." },
+        minimumVersion: { type: "string", description: "Smallest acceptable version, e.g. just vitamin D." },
+        notes: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.habit.upsertDefinition(args);
+      return {
+        text: `Habit saved: ${result.title}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_habit_list",
+    description: "List habit definitions.",
+    shortHint: "List habits.",
+    topics: ["habit"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        includeArchived: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.habit.listDefinitions(args);
+      return {
+        text: `Habits loaded: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_habit_status_today",
+    description: "Read today's habit state. Each habit is exactly one of done, incomplete, or abandoned for the day, plus nudge metadata.",
+    shortHint: "Read today's habit status.",
+    topics: ["habit"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        habitId: { type: "string" },
+        date: { type: "string", description: "Optional YYYY-MM-DD date. Defaults to today in Asia/Shanghai." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.habit.statusToday(args);
+      return {
+        text: `Habit status ${result.date}: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_habit_mark_done",
+    description: "Set today's mutually exclusive habit state to done. This can replace today's incomplete or abandoned state.",
+    shortHint: "Mark habit done.",
+    topics: ["habit"],
+    inputSchema: {
+      type: "object",
+      required: ["habitId"],
+      properties: {
+        habitId: { type: "string" },
+        note: { type: "string" },
+        source: { type: "string" },
+        createdAt: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.habit.markDone(args);
+      return {
+        text: `Habit done: ${result.habitId}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_habit_mark_incomplete",
+    description: "Set today's mutually exclusive habit state to incomplete. Use when the habit is still open and may be nudged later.",
+    shortHint: "Mark habit incomplete.",
+    topics: ["habit"],
+    inputSchema: {
+      type: "object",
+      required: ["habitId"],
+      properties: {
+        habitId: { type: "string" },
+        note: { type: "string" },
+        source: { type: "string" },
+        createdAt: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.habit.markIncomplete(args);
+      return {
+        text: `Habit incomplete: ${result.habitId}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_habit_mark_abandoned",
+    description: "Set today's mutually exclusive habit state to abandoned. Use when the clean reset is to give up for today, such as when doing it now would be harmful.",
+    shortHint: "Mark habit abandoned.",
+    topics: ["habit"],
+    inputSchema: {
+      type: "object",
+      required: ["habitId"],
+      properties: {
+        habitId: { type: "string" },
+        note: { type: "string" },
+        source: { type: "string" },
+        createdAt: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.habit.markAbandoned(args);
+      return {
+        text: `Habit abandoned: ${result.habitId}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_habit_mark_skipped",
+    description: "Compatibility alias for cyberboss_habit_mark_abandoned. Sets today's habit state to abandoned.",
+    shortHint: "Mark habit skipped.",
+    topics: ["habit"],
+    inputSchema: {
+      type: "object",
+      required: ["habitId"],
+      properties: {
+        habitId: { type: "string" },
+        note: { type: "string" },
+        source: { type: "string" },
+        createdAt: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.habit.markSkipped(args);
+      return {
+        text: `Habit skipped: ${result.habitId}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_habit_log_event",
+    description: "Log a habit event such as nudged, deferred, note, done, incomplete, or abandoned.",
+    shortHint: "Log a habit event.",
+    topics: ["habit"],
+    inputSchema: {
+      type: "object",
+      required: ["habitId", "type"],
+      properties: {
+        habitId: { type: "string" },
+        type: { type: "string", description: "done, incomplete, abandoned, nudged, deferred, note, or legacy skipped." },
+        note: { type: "string" },
+        source: { type: "string" },
+        context: { type: "string" },
+        createdAt: { type: "string" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.habit.logEvent(args);
+      return {
+        text: `Habit event logged: ${result.type}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_habit_suggest_next_action",
+    description: "Evaluate active habits against current context and suggest whether a contextual low-shame nudge is appropriate now.",
+    shortHint: "Suggest habit nudge/action.",
+    topics: ["habit", "pulse", "reminder"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        context: { type: "string", description: "Current scene, time window, whereabouts, or conversation context." },
+        userState: { type: "string", description: "Current inferred user state such as focused, low load, at home, after meal." },
+        limit: { type: "integer" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.habit.suggestNextAction(args);
+      return {
+        text: result.shouldContactUser ? "Habit nudge opportunity found." : "No habit nudge opportunity found.",
+        data: result,
+      };
+    },
+  },
+  {
     name: "cyberboss_diary_append",
     description: "Append a diary entry into Cyberboss local diary storage.",
     shortHint: "Append a diary entry with direct text content.",
@@ -112,6 +663,216 @@ const PROJECT_TOOLS = [
       const result = await services.reminder.create(args, context);
       return {
         text: `Reminder queued: ${result.id}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_obsidian_status",
+    description: "Inspect whether an Obsidian vault is configured and reachable.",
+    shortHint: "Check Obsidian vault configuration.",
+    topics: ["obsidian", "memory"],
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    async handler({ services }) {
+      const result = services.obsidian.getStatus();
+      return {
+        text: result.configured && result.exists
+          ? `Obsidian vault ready: ${result.vaultRoot}`
+          : "Obsidian vault is not configured or not reachable.",
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_obsidian_search",
+    description: "Search configured Obsidian Markdown notes by keywords before reading a specific note.",
+    shortHint: "Search Obsidian notes by keyword.",
+    topics: ["obsidian", "memory"],
+    inputSchema: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        query: { type: "string", description: "Keyword query. Multiple terms are AND-matched." },
+        limit: { type: "integer", description: "Optional maximum result count, capped at 50." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.obsidian.search(args);
+      return {
+        text: `Obsidian search results: ${result.resultCount}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_obsidian_recent",
+    description: "List recently modified Obsidian Markdown notes for lightweight context discovery.",
+    shortHint: "List recent Obsidian notes.",
+    topics: ["obsidian", "memory"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Optional maximum result count, capped at 50." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.obsidian.recent(args);
+      return {
+        text: `Recent Obsidian notes loaded: ${result.resultCount}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_obsidian_read",
+    description: "Read a specific Markdown note from the configured Obsidian vault by relative path.",
+    shortHint: "Read one Obsidian note by relative path.",
+    topics: ["obsidian", "memory"],
+    inputSchema: {
+      type: "object",
+      required: ["relativePath"],
+      properties: {
+        relativePath: { type: "string", description: "Path relative to the configured vault root, such as folder/note.md." },
+        maxChars: { type: "integer", description: "Optional character cap, capped at 50000." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.obsidian.read(args);
+      return {
+        text: `Obsidian note read: ${result.relativePath}${result.truncated ? " (truncated)" : ""}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_obsidian_random_daily_excerpt",
+    description: "Pick a random short excerpt from recent Obsidian daily notes. Use this during quiet pulses for serendipitous context before deciding whether to search or add a stone-box item.",
+    shortHint: "Pick a random daily-note excerpt.",
+    topics: ["obsidian", "research", "stone-box"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        daysBack: { type: "integer", description: "How many recent days to sample from. Defaults to 45." },
+        maxChars: { type: "integer", description: "Maximum excerpt characters, capped at 2000." },
+        dailyDir: { type: "string", description: "Daily note directory relative to the vault. Defaults to Daily note." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.obsidian.randomDailyExcerpt(args);
+      return {
+        text: result.found
+          ? `Random Obsidian excerpt loaded: ${result.relativePath}.`
+          : `Random Obsidian excerpt unavailable: ${result.reason || "not found"}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_stone_box_add",
+    description: "Store a serendipitous found item in the stone box. Use this for interesting search results or fragments inspired by Obsidian that should not become durable memory yet.",
+    shortHint: "Add an item to the stone box.",
+    topics: ["stone-box", "research", "obsidian"],
+    inputSchema: {
+      type: "object",
+      required: ["title", "content"],
+      properties: {
+        title: { type: "string" },
+        content: { type: "string" },
+        whyInteresting: { type: "string" },
+        source: { type: "string", description: "web_search, obsidian, article, book, video, agent, or other source label." },
+        sourceRef: { type: "string", description: "URL, note path, citation, or short provenance." },
+        obsidianRef: { type: "string", description: "The daily-note excerpt path or reference that triggered this item." },
+        status: { type: "string", description: "active, shared, or archived." },
+        tags: { type: "array", items: { type: "string" } },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.stoneBox.add(args);
+      return {
+        text: `Stone boxed: ${result.title}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_stone_box_search",
+    description: "Search stone-box items before sharing or connecting a serendipitous finding.",
+    shortHint: "Search the stone box.",
+    topics: ["stone-box", "research"],
+    inputSchema: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        query: { type: "string" },
+        limit: { type: "integer" },
+        includeArchived: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.stoneBox.search(args);
+      return {
+        text: `Stone box search results: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_stone_box_list",
+    description: "List recent stone-box items.",
+    shortHint: "List stone-box items.",
+    topics: ["stone-box"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        status: { type: "string" },
+        limit: { type: "integer" },
+        includeArchived: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.stoneBox.list(args);
+      return {
+        text: `Stone box loaded: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_stone_box_update",
+    description: "Update or mark a stone-box item as shared or archived.",
+    shortHint: "Update a stone-box item.",
+    topics: ["stone-box"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string" },
+        title: { type: "string" },
+        content: { type: "string" },
+        whyInteresting: { type: "string" },
+        source: { type: "string" },
+        sourceRef: { type: "string" },
+        obsidianRef: { type: "string" },
+        status: { type: "string", description: "active, shared, or archived." },
+        tags: { type: "array", items: { type: "string" } },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.stoneBox.update(args);
+      return {
+        text: `Stone box updated: ${result.title}`,
         data: result,
       };
     },

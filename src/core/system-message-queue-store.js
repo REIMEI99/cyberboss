@@ -72,6 +72,38 @@ class SystemMessageQueueStore {
     const normalizedAccountId = normalizeText(accountId);
     return this.state.messages.some((message) => message.accountId === normalizedAccountId);
   }
+
+  pruneStaleForAccount(accountId, { source = "", legacyText = "", maxAgeMs = 0, nowMs = Date.now() } = {}) {
+    this.load();
+    const normalizedAccountId = normalizeText(accountId);
+    const normalizedSource = normalizeText(source);
+    const normalizedLegacyText = normalizeText(legacyText);
+    const normalizedMaxAgeMs = Number(maxAgeMs);
+    const normalizedNowMs = Number(nowMs);
+    if (!normalizedAccountId || !Number.isFinite(normalizedMaxAgeMs) || normalizedMaxAgeMs <= 0 || !Number.isFinite(normalizedNowMs)) {
+      return 0;
+    }
+
+    let removed = 0;
+    const pending = [];
+    for (const message of this.state.messages) {
+      if (
+        message.accountId === normalizedAccountId
+        && matchesStaleFilter(message, { source: normalizedSource, legacyText: normalizedLegacyText })
+        && isOlderThan(message, normalizedMaxAgeMs, normalizedNowMs)
+      ) {
+        removed += 1;
+        continue;
+      }
+      pending.push(message);
+    }
+
+    if (removed) {
+      this.state.messages = pending;
+      this.save();
+    }
+    return removed;
+  }
 }
 
 function normalizeSystemMessage(message) {
@@ -85,12 +117,14 @@ function normalizeSystemMessage(message) {
   const workspaceRoot = normalizeText(message.workspaceRoot);
   const text = normalizeText(message.text);
   const createdAt = normalizeIsoTime(message.createdAt);
+  const source = normalizeText(message.source);
+  const expiresAt = normalizeIsoTime(message.expiresAt);
 
   if (!id || !accountId || !senderId || !workspaceRoot || !text) {
     return null;
   }
 
-  return {
+  const normalized = {
     id,
     accountId,
     senderId,
@@ -98,6 +132,29 @@ function normalizeSystemMessage(message) {
     text,
     createdAt: createdAt || new Date().toISOString(),
   };
+  if (source) {
+    normalized.source = source;
+  }
+  if (expiresAt) {
+    normalized.expiresAt = expiresAt;
+  }
+  return normalized;
+}
+
+function matchesStaleFilter(message, { source, legacyText }) {
+  if (source && message?.source === source) {
+    return true;
+  }
+  return Boolean(legacyText && !message?.source && message?.text === legacyText);
+}
+
+function isOlderThan(message, maxAgeMs, nowMs) {
+  const expiresAtMs = Date.parse(message?.expiresAt || "");
+  if (Number.isFinite(expiresAtMs) && expiresAtMs <= nowMs) {
+    return true;
+  }
+  const createdAtMs = Date.parse(message?.createdAt || "");
+  return Number.isFinite(createdAtMs) && nowMs - createdAtMs >= maxAgeMs;
 }
 
 function normalizeIsoTime(value) {

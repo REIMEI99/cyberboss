@@ -94,9 +94,17 @@ function runToolMcpServer({ toolHost, runtimeId = "", workspaceRoot = "" }) {
         const args = params.arguments && typeof params.arguments === "object"
           ? params.arguments
           : {};
+        const startedAtMs = Date.now();
         const result = await toolHost.invokeTool(toolName, args, {
           runtimeId,
           workspaceRoot,
+        });
+        logToolCall({
+          toolName,
+          runtimeId,
+          workspaceRoot,
+          durationMs: Date.now() - startedAtMs,
+          resultText: result?.text,
         });
         writeRpcResponse(id, {
           content: [
@@ -111,6 +119,14 @@ function runToolMcpServer({ toolHost, runtimeId = "", workspaceRoot = "" }) {
 
       writeRpcError(id, -32601, `Method not found: ${method}`, reader.getMode());
     } catch (error) {
+      if (method === "tools/call") {
+        logToolCall({
+          toolName: typeof params.name === "string" ? params.name : "",
+          runtimeId,
+          workspaceRoot,
+          error,
+        });
+      }
       writeRpcResponse(id, {
         content: [
           {
@@ -122,6 +138,34 @@ function runToolMcpServer({ toolHost, runtimeId = "", workspaceRoot = "" }) {
       }, reader.getMode());
     }
   });
+}
+
+function logToolCall({ toolName = "", runtimeId = "", workspaceRoot = "", durationMs = null, resultText = "", error = null } = {}) {
+  const status = error ? "error" : "ok";
+  const parts = [
+    `[cyberboss] tool ${status}`,
+    `name=${normalizeLogValue(toolName) || "(unknown)"}`,
+  ];
+  if (runtimeId) {
+    parts.push(`runtime=${normalizeLogValue(runtimeId)}`);
+  }
+  if (workspaceRoot) {
+    parts.push(`workspace=${JSON.stringify(workspaceRoot)}`);
+  }
+  if (Number.isFinite(durationMs)) {
+    parts.push(`duration=${durationMs}ms`);
+  }
+  const detail = error
+    ? error instanceof Error ? error.message : String(error || "")
+    : normalizeLogValue(resultText);
+  if (detail) {
+    parts.push(`result=${JSON.stringify(detail.slice(0, 180))}`);
+  }
+  fs.writeSync(process.stderr.fd, `${parts.join(" ")}\n`);
+}
+
+function normalizeLogValue(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 function formatToolResult(result) {

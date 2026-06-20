@@ -1021,7 +1021,7 @@ class CyberbossApp {
       return;
     }
 
-    if (!isPathWithinAllowedDirectories(workspaceRoot)) {
+    if (!isPathWithinAllowedDirectories(workspaceRoot, this.config)) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
         text: "⚠️ The path must be within your home directory or the current working directory.",
@@ -1939,13 +1939,13 @@ function extractPathFromFileUri(value) {
   }
 }
 
-function isPathWithinAllowedDirectories(rawPath) {
+function isPathWithinAllowedDirectories(rawPath, config = {}) {
   const resolved = path.resolve(rawPath);
   const normalized = resolved.replace(/\\/g, "/") + "/";
   const allowedDirs = [
     os.homedir(),
     process.cwd(),
-    this?.config?.workspaceRoot,
+    config.workspaceRoot,
   ]
     .filter(Boolean)
     .map((dir) => path.resolve(dir).replace(/\\/g, "/") + "/");

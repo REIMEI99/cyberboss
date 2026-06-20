@@ -724,10 +724,14 @@ function sanitizeReplyText(plainReplyText) {
 function resolveSystemReplyDelivery(replyText, policy = createSystemReplyPolicy("")) {
   const normalized = normalizeLineEndings(String(replyText || "")).trim();
   if (!normalized) {
-    return { kind: "invalid", reason: "final reply is empty" };
+    return { kind: "silent" };
   }
 
   const source = normalizeSystemReplySource(normalized);
+  const actionCandidate = extractSystemActionJsonCandidate(source.text);
+  if (actionCandidate) {
+    return resolveSystemReplyAction(actionCandidate);
+  }
   if (source.requiresStructuredAction || source.text.startsWith("{")) {
     return resolveSystemReplyAction(source.text);
   }

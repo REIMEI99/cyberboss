@@ -43,15 +43,17 @@ async function main() {
   // For Claude: connect to the bridge's IPC socket so we can observe and
   // interact with the same ClaudeCode process that handles WeChat messages.
   const stateDir = process.env.CYBERBOSS_STATE_DIR || path.join(os.homedir(), ".cyberboss");
-  const socketPath = path.join(stateDir, "claudecode-runtime.sock");
+  const portFile = path.join(stateDir, "claudecode-runtime.port");
+  const tokenFile = path.join(stateDir, "claudecode-runtime.token");
 
-  if (!fs.existsSync(socketPath)) {
-    console.error(`Claude IPC socket not found: ${socketPath}`);
+  if (!fs.existsSync(portFile)) {
+    console.error(`Claude IPC port file not found: ${portFile}`);
     console.error("Make sure the bridge is running with CYBERBOSS_RUNTIME=claudecode.");
     process.exit(1);
   }
 
-  const socket = net.createConnection(socketPath);
+  const port = Number(fs.readFileSync(portFile, "utf8").trim());
+  const socket = net.createConnection(port, "127.0.0.1");
   socket.setEncoding("utf8");
 
   let connected = false;
@@ -64,12 +66,11 @@ async function main() {
     setTimeout(() => reject(new Error("connect timeout")), 3000);
   });
 
-  console.log(`Connected to ClaudeCode bridge IPC (${socketPath})`);
+  console.log(`Connected to ClaudeCode bridge IPC (127.0.0.1:${port})`);
   console.log(`Observing workspace: ${workspaceRoot}`);
   console.log("Type your message and press Enter to send. Ctrl+C to exit.\n");
 
   // Authenticate with the IPC server
-  const tokenFile = `${socketPath}.token`;
   let authToken = "";
   try {
     authToken = fs.readFileSync(tokenFile, "utf8").trim();
