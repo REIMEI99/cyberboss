@@ -83,7 +83,7 @@ const DEFAULT_HIDDEN_TOOL_NAMES = new Set([
   "cyberboss_research_search",
   "cyberboss_research_list",
   "cyberboss_research_archive",
-  "cyberboss_task_list",
+  "cyberboss_seedbox_list",
   "cyberboss_habit_list",
   "cyberboss_habit_status_today",
   "cyberboss_habit_history",
@@ -104,7 +104,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_pulse_review",
     description: "Run the default pulse review flow in one step: inspect current context, habit status, an Obsidian signal, future material worth revisiting, and whether there is a good reason to message the user or set a follow-up reminder.",
     shortHint: "Run the default pulse review flow.",
-    topics: ["pulse", "habit", "obsidian", "task", "reminder"],
+    topics: ["pulse", "habit", "obsidian", "seedbox", "reminder"],
     inputSchema: {
       type: "object",
       properties: {
@@ -113,7 +113,7 @@ const PROJECT_TOOLS = [
         userState: { type: "string", description: "Current inferred user state such as focused, low load, at home, after meal." },
         obsidianQuery: { type: "string", description: "Optional query for targeted Obsidian search. If omitted, a random daily excerpt is preferred." },
         includeObsidianExcerpt: { type: "boolean", description: "Whether to include a random daily-note excerpt when no query is provided. Defaults to true." },
-        includeTasks: { type: "boolean", description: "Whether to include active seed-like carry-over items. Defaults to true." },
+        includeSeedbox: { type: "boolean", description: "Whether to include active seedbox items. Defaults to true." },
         includeMemories: { type: "boolean", description: "Whether to include a few recent durable memories. Defaults to true." },
         allowResearch: { type: "boolean", description: "Reserved flag for future evolving-research integration. Defaults to false." },
       },
@@ -122,7 +122,7 @@ const PROJECT_TOOLS = [
     async handler({ services, args }) {
       const turnIntent = normalizeTurnIntent(args.turnIntent);
       const includeObsidianExcerpt = args.includeObsidianExcerpt !== false;
-      const includeTasks = args.includeTasks !== false;
+      const includeSeedbox = args.includeSeedbox !== false;
       const includeMemories = args.includeMemories !== false;
       const obsidianQuery = normalizeText(args.obsidianQuery);
 
@@ -155,9 +155,9 @@ const PROJECT_TOOLS = [
       const memories = includeMemories
         ? services.agentMemory.list({ limit: 5, includeArchived: false })
         : { count: 0, memories: [] };
-      const tasks = includeTasks
-        ? services.agentTask.list({ limit: 5, includeDone: false })
-        : { count: 0, tasks: [] };
+      const seedbox = includeSeedbox
+        ? services.seedbox.list({ limit: 5, includeDone: false })
+        : { count: 0, items: [] };
 
       const summary = buildPulseReviewSummary({
         turnIntent,
@@ -167,7 +167,7 @@ const PROJECT_TOOLS = [
         habitSuggestion,
         obsidian,
         memories,
-        tasks,
+        seedbox,
       });
 
       return {
@@ -181,7 +181,7 @@ const PROJECT_TOOLS = [
           habitSuggestion,
           obsidian,
           memories,
-          tasks,
+          seedbox,
           messageOpportunity: summary.messageOpportunity,
           followupOpportunity: summary.followupOpportunity,
           recommendedPrivateActions: summary.recommendedPrivateActions,
@@ -197,7 +197,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_followup_decide",
     description: "Turn a follow-up judgment into the default action: create a reminder when later follow-up is warranted, otherwise record that no reminder is needed.",
     shortHint: "Convert follow-up intent into a reminder decision.",
-    topics: ["reminder", "pulse", "task"],
+    topics: ["reminder", "pulse", "seedbox"],
     inputSchema: {
       type: "object",
       required: ["summary"],
@@ -252,7 +252,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_memory_remember",
     description: "Store a long-term structured memory that should influence future judgment. Do not use this for diary-like logs, tiny one-off details, or evolving research notes; use cyberboss_research_upsert for research.",
     shortHint: "Store a long-term memory.",
-    topics: ["memory", "task"],
+    topics: ["memory", "seedbox"],
     inputSchema: {
       type: "object",
       required: ["type", "subject", "content"],
@@ -280,7 +280,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_memory_search",
     description: "Search long-term structured memories before making a judgment that may depend on durable user preferences, facts, projects, or relationship context.",
     shortHint: "Search long-term memories.",
-    topics: ["memory", "task"],
+    topics: ["memory", "seedbox"],
     inputSchema: {
       type: "object",
       required: ["query"],
@@ -378,7 +378,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_research_upsert",
     description: "Create or update an evolving research topic in a dedicated research file. Use this for temporary hypotheses, changing opinions, source notes, open questions, and synthesis instead of long-term memory.",
     shortHint: "Create or update research notes.",
-    topics: ["research", "task", "memory"],
+    topics: ["research", "seedbox", "memory"],
     inputSchema: {
       type: "object",
       required: ["topic"],
@@ -396,7 +396,7 @@ const PROJECT_TOOLS = [
         confidence: { type: "number", description: "0 to 1. Defaults to 0.5." },
         source: { type: "string", description: "wechat, web_search, obsidian, agent, or other source label." },
         sourceRef: { type: "string", description: "Optional URL, note path, message time, or short provenance." },
-        taskId: { type: "string", description: "Optional related cyberboss task id." },
+        taskId: { type: "string", description: "Optional related cyberboss seedbox item id." },
         tags: { type: "array", items: { type: "string" } },
       },
       additionalProperties: false,
@@ -413,7 +413,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_research_search",
     description: "Search dedicated evolving research notes before starting or continuing investigation.",
     shortHint: "Search research notes.",
-    topics: ["research", "task"],
+    topics: ["research", "seedbox"],
     inputSchema: {
       type: "object",
       required: ["query"],
@@ -436,7 +436,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_research_list",
     description: "List active research topics. Use during pulse/check-in to decide which investigation to advance before choosing silent.",
     shortHint: "List research topics.",
-    topics: ["research", "task"],
+    topics: ["research", "seedbox"],
     inputSchema: {
       type: "object",
       properties: {
@@ -457,7 +457,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_research_archive",
-    description: "Archive a research topic that is no longer useful or has been converted into durable memory or task-seed output.",
+    description: "Archive a research topic that is no longer useful or has been converted into durable memory or seedbox output.",
     shortHint: "Archive research.",
     topics: ["research"],
     inputSchema: {
@@ -478,63 +478,63 @@ const PROJECT_TOOLS = [
     },
   },
   {
-    name: "cyberboss_task_create",
-    description: "Create a structured internal seed-like item for unresolved worries, things to learn later, future threads, or concrete finds the agent should not lose across turns.",
-    shortHint: "Create an internal seed-like item.",
-    topics: ["task", "memory", "research"],
+    name: "cyberboss_seedbox_create",
+    description: "Create a structured seedbox item for unresolved worries, things to learn later, future threads, or concrete finds the agent should not lose across turns.",
+    shortHint: "Create a seedbox item.",
+    topics: ["seedbox", "memory", "research"],
     inputSchema: {
       type: "object",
       required: ["title"],
       properties: {
         kind: { type: "string", description: "Optional seed type such as seed, concern, wish, research, followup, or find." },
-        title: { type: "string", description: "Short seed title." },
+        title: { type: "string", description: "Short seedbox title." },
         goal: { type: "string", description: "Optional why-keep field: why this item should survive and what future value it may hold." },
         status: { type: "string", description: "Optional compatibility field: pending, active, waiting, done, or cancelled." },
-        priority: { type: "string", description: "Optional compatibility field. Usually omit unless one seed clearly deserves more attention." },
+        priority: { type: "string", description: "Optional compatibility field. Usually omit unless one seedbox item clearly deserves more attention." },
         dueAt: { type: "string", description: "Optional compatibility field. Prefer reminder for actual time-based follow-up." },
-        nextAction: { type: "string", description: "Optional smallest useful next step if this seed later becomes actionable." },
+        nextAction: { type: "string", description: "Optional smallest useful next step if this seedbox item later becomes actionable." },
         deliverable: { type: "string", description: "Optional future output shape such as silent, message, diary, timeline, briefing, or file." },
         tags: { type: "array", items: { type: "string" } },
-        notes: { type: "string", description: "Optional raw details, links, quotes, products, worries, or context that should stay attached to the seed." },
+        notes: { type: "string", description: "Optional raw details, links, quotes, products, worries, or context that should stay attached to the seedbox item." },
       },
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.agentTask.create(args);
+      const result = services.seedbox.create(args);
       return {
-        text: `Seed stored in task: ${result.title}`,
+        text: `Seedbox item stored: ${result.title}`,
         data: result,
       };
     },
   },
   {
-    name: "cyberboss_task_list",
-    description: "List structured internal seed-like items. Use this when checking what unresolved or future-useful material the agent should keep alive across turns.",
-    shortHint: "List internal seed-like items.",
-    topics: ["task", "memory", "research"],
+    name: "cyberboss_seedbox_list",
+    description: "List structured seedbox items. Use this when checking what unresolved or future-useful material the agent should keep alive across turns.",
+    shortHint: "List seedbox items.",
+    topics: ["seedbox", "memory", "research"],
     inputSchema: {
       type: "object",
       properties: {
         status: { type: "string", description: "Optional status filter." },
         kind: { type: "string", description: "Optional kind filter." },
-        limit: { type: "integer", description: "Optional maximum task count." },
-        includeDone: { type: "boolean", description: "Whether to include done/cancelled tasks." },
+        limit: { type: "integer", description: "Optional maximum seedbox item count." },
+        includeDone: { type: "boolean", description: "Whether to include done/cancelled seedbox items." },
       },
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.agentTask.list(args);
+      const result = services.seedbox.list(args);
       return {
-        text: `Task seeds loaded: ${result.count}.`,
+        text: `Seedbox items loaded: ${result.count}.`,
         data: result,
       };
     },
   },
   {
-    name: "cyberboss_task_update",
-    description: "Update a structured internal seed-like item after it becomes clearer, more relevant, more concrete, or less useful.",
-    shortHint: "Update an internal seed-like item.",
-    topics: ["task", "memory", "research"],
+    name: "cyberboss_seedbox_update",
+    description: "Update a structured seedbox item after it becomes clearer, more relevant, more concrete, or less useful.",
+    shortHint: "Update a seedbox item.",
+    topics: ["seedbox", "memory", "research"],
     inputSchema: {
       type: "object",
       required: ["id"],
@@ -554,18 +554,18 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.agentTask.update(args);
+      const result = services.seedbox.update(args);
       return {
-        text: `Task seed updated: ${result.title}`,
+        text: `Seedbox item updated: ${result.title}`,
         data: result,
       };
     },
   },
   {
-    name: "cyberboss_task_complete",
-    description: "Mark a structured internal seed-like item as resolved, exhausted, or no longer worth keeping active.",
-    shortHint: "Complete an internal seed-like item.",
-    topics: ["task", "memory", "research"],
+    name: "cyberboss_seedbox_complete",
+    description: "Mark a structured seedbox item as resolved, exhausted, or no longer worth keeping active.",
+    shortHint: "Complete a seedbox item.",
+    topics: ["seedbox", "memory", "research"],
     inputSchema: {
       type: "object",
       required: ["id"],
@@ -576,9 +576,9 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.agentTask.complete(args);
+      const result = services.seedbox.complete(args);
       return {
-        text: `Task seed completed: ${result.title}`,
+        text: `Seedbox item completed: ${result.title}`,
         data: result,
       };
     },
@@ -718,9 +718,9 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_obsidian_random_daily_excerpt",
-    description: "Pick a random short excerpt from recent Obsidian daily notes. Use this during quiet pulses for serendipitous context before deciding whether to search further or capture a task seed.",
+    description: "Pick a random short excerpt from recent Obsidian daily notes. Use this during quiet pulses for serendipitous context before deciding whether to search further or capture a seedbox item.",
     shortHint: "Pick a random daily-note excerpt.",
-    topics: ["obsidian", "research", "task"],
+    topics: ["obsidian", "research", "seedbox"],
     inputSchema: {
       type: "object",
       properties: {
@@ -1218,12 +1218,12 @@ function buildPulseReviewSummary({
   habitSuggestion,
   obsidian,
   memories,
-  tasks,
+  seedbox,
 }) {
   const incompleteHabits = Array.isArray(habitStatus?.habits)
     ? habitStatus.habits.filter((item) => item?.dailyState === "incomplete")
     : [];
-  const openTasks = Array.isArray(tasks?.tasks) ? tasks.tasks : [];
+  const openSeedboxItems = Array.isArray(seedbox?.items) ? seedbox.items : [];
   const durableMemories = Array.isArray(memories?.memories) ? memories.memories : [];
 
   const currentContextSummary = {
@@ -1231,7 +1231,7 @@ function buildPulseReviewSummary({
     context: normalizeText(context),
     userState: normalizeText(userState),
     incompleteHabitCount: incompleteHabits.length,
-    openTaskCount: openTasks.length,
+    openSeedboxCount: openSeedboxItems.length,
     memoryCount: durableMemories.length,
     obsidianSource: normalizeText(obsidian?.source) || "none",
     obsidianFound: detectObsidianSignal(obsidian),
@@ -1253,7 +1253,7 @@ function buildPulseReviewSummary({
   if (!reasons.length && hasInterestingObsidianSignal) {
     reasons.push("Obsidian contains a potentially relevant signal, but it may only justify private review");
   }
-  if (!reasons.length && openTasks.length) {
+  if (!reasons.length && openSeedboxItems.length) {
     reasons.push("there is internal carry-over material worth keeping in view, but none clearly requires interrupting the user");
   }
   if (!reasons.length) {
@@ -1285,8 +1285,8 @@ function buildPulseReviewSummary({
   if (followupOpportunity.shouldSetReminder && !shouldContactForReminder) {
     recommendedPrivateActions.push("set a reminder for today's incomplete habit instead of letting it disappear");
   }
-  if (openTasks.length) {
-    recommendedPrivateActions.push("review whether one internal carry-over item should be clarified, preserved, or quietly advanced");
+  if (openSeedboxItems.length) {
+    recommendedPrivateActions.push("review whether one seedbox item should be clarified, preserved, or quietly advanced");
   }
   if (!recommendedPrivateActions.length) {
     recommendedPrivateActions.push("stay silent and wait for a better trigger");

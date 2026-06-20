@@ -3,13 +3,13 @@ const { SessionStore } = require("../adapters/runtime/codex/session-store");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const { AgentMemoryService } = require("../services/agent-memory-service");
 const { AgentResearchService } = require("../services/agent-research-service");
-const { AgentTaskService } = require("../services/agent-task-service");
 const { ChannelFileService } = require("../services/channel-file-service");
 const { DiaryService } = require("../services/diary-service");
 const { HabitProvider } = require("../habit/habit-provider");
 const { HabitService } = require("../habit/habit-service");
 const { ObsidianService } = require("../services/obsidian-service");
 const { ReminderService } = require("../services/reminder-service");
+const { SeedboxService } = require("../services/seedbox-service");
 const { StickerService } = require("../services/sticker-service");
 const { SystemMessageService } = require("../services/system-message-service");
 const { TimelineService } = require("../services/timeline-service");
@@ -30,7 +30,7 @@ function createProjectTooling(config, options = {}) {
   const channelFile = new ChannelFileService({ config, channelAdapter, sessionStore });
   const habit = new HabitService(buildHabitServiceOptions(config));
   const services = {
-    agentTask: new AgentTaskService({ config }),
+    seedbox: new SeedboxService({ config }),
     agentMemory: new AgentMemoryService({ config }),
     agentResearch: new AgentResearchService({ config }),
     diary: new DiaryService({ config }),

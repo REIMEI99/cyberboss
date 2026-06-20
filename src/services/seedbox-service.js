@@ -2,16 +2,17 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const TASK_KINDS = new Set(["seed", "concern", "wish", "research", "followup", "find", "explore", "remember", "maintenance"]);
-const TASK_STATUSES = new Set(["pending", "active", "waiting", "done", "cancelled"]);
-const TASK_PRIORITIES = new Set(["low", "normal", "high"]);
+const SEEDBOX_KINDS = new Set(["seed", "concern", "wish", "research", "followup", "find", "explore", "remember", "maintenance"]);
+const SEEDBOX_STATUSES = new Set(["pending", "active", "waiting", "done", "cancelled"]);
+const SEEDBOX_PRIORITIES = new Set(["low", "normal", "high"]);
 const DELIVERABLES = new Set(["silent", "message", "diary", "timeline", "briefing", "file"]);
 
-class AgentTaskService {
+class SeedboxService {
   constructor({ config }) {
     this.config = config;
-    this.filePath = config.agentTaskFile;
-    this.state = { tasks: [] };
+    this.filePath = config.seedboxFile;
+    this.legacyFilePath = config.legacyTaskFile;
+    this.state = { items: [] };
     this.ensureParentDirectory();
     this.load();
   }
@@ -21,26 +22,37 @@ class AgentTaskService {
   }
 
   load() {
-    try {
-      const raw = fs.readFileSync(this.filePath, "utf8");
-      const parsed = JSON.parse(raw);
-      const tasks = Array.isArray(parsed?.tasks) ? parsed.tasks : [];
-      this.state = {
-        tasks: tasks.map(normalizeTask).filter(Boolean).sort(compareTasks),
-      };
-    } catch {
-      this.state = { tasks: [] };
-    }
+    const parsed = this.readStateFile(this.filePath) || this.readStateFile(this.legacyFilePath);
+    const items = Array.isArray(parsed?.items)
+      ? parsed.items
+      : Array.isArray(parsed?.tasks)
+        ? parsed.tasks
+        : [];
+    this.state = {
+      items: items.map(normalizeSeedboxItem).filter(Boolean).sort(compareSeedboxItems),
+    };
   }
 
   save() {
     fs.writeFileSync(this.filePath, JSON.stringify(this.state, null, 2));
   }
 
+  readStateFile(filePath) {
+    if (!filePath) {
+      return null;
+    }
+    try {
+      const raw = fs.readFileSync(filePath, "utf8");
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
   create(input = {}) {
     this.load();
     const now = new Date().toISOString();
-    const task = normalizeTask({
+    const item = normalizeSeedboxItem({
       id: crypto.randomUUID(),
       kind: input.kind,
       title: input.title,
@@ -56,13 +68,13 @@ class AgentTaskService {
       createdAt: now,
       updatedAt: now,
     });
-    if (!task) {
-      throw new Error("Invalid task seed. Provide at least a title.");
+    if (!item) {
+      throw new Error("Invalid seedbox item. Provide at least a title.");
     }
-    this.state.tasks.push(task);
-    this.state.tasks.sort(compareTasks);
+    this.state.items.push(item);
+    this.state.items.sort(compareSeedboxItems);
     this.save();
-    return task;
+    return item;
   }
 
   list({ status = "", kind = "", limit = 20, includeDone = false } = {}) {
@@ -70,30 +82,30 @@ class AgentTaskService {
     const normalizedStatus = normalizeText(status);
     const normalizedKind = normalizeText(kind);
     const normalizedLimit = normalizeLimit(limit);
-    const tasks = this.state.tasks
-      .filter((task) => includeDone || !["done", "cancelled"].includes(task.status))
-      .filter((task) => !normalizedStatus || task.status === normalizedStatus)
-      .filter((task) => !normalizedKind || task.kind === normalizedKind)
+    const items = this.state.items
+      .filter((item) => includeDone || !["done", "cancelled"].includes(item.status))
+      .filter((item) => !normalizedStatus || item.status === normalizedStatus)
+      .filter((item) => !normalizedKind || item.kind === normalizedKind)
       .slice(0, normalizedLimit);
     return {
       filePath: this.filePath,
-      count: tasks.length,
-      tasks,
+      count: items.length,
+      items,
     };
   }
 
   update({ id = "", ...patch } = {}) {
     this.load();
-    const taskId = normalizeText(id);
-    if (!taskId) {
-      throw new Error("Task seed update requires id.");
+    const itemId = normalizeText(id);
+    if (!itemId) {
+      throw new Error("Seedbox update requires id.");
     }
-    const index = this.state.tasks.findIndex((task) => task.id === taskId);
+    const index = this.state.items.findIndex((item) => item.id === itemId);
     if (index < 0) {
-      throw new Error(`Task seed not found: ${taskId}`);
+      throw new Error(`Seedbox item not found: ${itemId}`);
     }
-    const current = this.state.tasks[index];
-    const next = normalizeTask({
+    const current = this.state.items[index];
+    const next = normalizeSeedboxItem({
       ...current,
       ...filterDefinedPatch(patch),
       dueAtMs: Object.prototype.hasOwnProperty.call(patch, "dueAt")
@@ -104,10 +116,10 @@ class AgentTaskService {
       updatedAt: new Date().toISOString(),
     });
     if (!next) {
-      throw new Error("Task seed update produced an invalid item.");
+      throw new Error("Seedbox update produced an invalid item.");
     }
-    this.state.tasks[index] = next;
-    this.state.tasks.sort(compareTasks);
+    this.state.items[index] = next;
+    this.state.items.sort(compareSeedboxItems);
     this.save();
     return next;
   }
@@ -121,16 +133,16 @@ class AgentTaskService {
   }
 }
 
-function normalizeTask(value) {
+function normalizeSeedboxItem(value) {
   if (!value || typeof value !== "object") {
     return null;
   }
   const id = normalizeText(value.id);
-  const kind = normalizeChoice(value.kind, TASK_KINDS, "seed");
+  const kind = normalizeChoice(value.kind, SEEDBOX_KINDS, "seed");
   const title = normalizeText(value.title);
   const goal = normalizeText(value.goal);
-  const status = normalizeChoice(value.status, TASK_STATUSES, "pending");
-  const priority = normalizeChoice(value.priority, TASK_PRIORITIES, "normal");
+  const status = normalizeChoice(value.status, SEEDBOX_STATUSES, "pending");
+  const priority = normalizeChoice(value.priority, SEEDBOX_PRIORITIES, "normal");
   const nextAction = normalizeText(value.nextAction);
   const deliverable = normalizeChoice(value.deliverable, DELIVERABLES, "silent");
   const createdAt = normalizeIsoTime(value.createdAt) || new Date().toISOString();
@@ -169,7 +181,7 @@ function filterDefinedPatch(patch) {
   return result;
 }
 
-function compareTasks(left, right) {
+function compareSeedboxItems(left, right) {
   const leftStatus = statusRank(left.status);
   const rightStatus = statusRank(right.status);
   if (leftStatus !== rightStatus) {
@@ -251,4 +263,4 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-module.exports = { AgentTaskService };
+module.exports = { SeedboxService };

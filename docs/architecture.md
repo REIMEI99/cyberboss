@@ -7,6 +7,7 @@
 - reading config
 - choosing which channel / runtime / integrations to use
 - orchestrating capabilities instead of implementing concrete protocols
+- owning trigger semantics such as user message, pulse, reminder, and approval flow
 
 ## Channel Adapters
 
@@ -21,7 +22,7 @@ Responsible for:
 Not responsible for:
 
 - Codex / Claude Code thread logic
-- reminder / timeline / diary logic
+- reminder / habit / seedbox / timeline / diary logic
 
 ## Runtime Adapters
 
@@ -31,11 +32,29 @@ Responsible for:
 
 - sending messages into the specific agent runtime
 - handling thread / session / approval / stop
+- injecting model-facing instruction layers and project-native tools
 
 Not responsible for:
 
 - WeChat protocol details
 - timeline UI
+
+## Local State Modules
+
+The main local behavior/state modules are:
+
+- `reminder`
+  Follow-up substrate and future re-entry queue
+- `habit`
+  Daily completion state, history, and heatmap-oriented tracking
+- `seedbox`
+  Future-useful internal carry-over material that should survive across turns without becoming a hard task board
+- `memory`
+  Durable structured facts and preferences
+- `research`
+  Evolving, revisable investigation state
+
+These modules are coordinated by app/runtime flow rather than treated as separate products.
 
 ## Capability Integrations
 
@@ -44,10 +63,9 @@ Not responsible for:
 Examples:
 
 - `timeline`
-- `reminder`
-- `diary`
+- `whereabouts`
 
-These capabilities should depend on external standalone projects whenever possible, instead of being folded back into the main repository.
+External integrations should depend on standalone projects whenever possible, instead of being folded back into the main repository.
 
 ## Expected External Dependencies
 

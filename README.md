@@ -71,7 +71,7 @@ If the most interesting part of Cyberboss is the "ledger of life" layer, you can
 - It is an independent project and does not require the WeChat bridge
 - You can plug it into your own agent, bot, or automation stack even if you do not use Codex
 
-Cyberboss builds on top of `timeline-for-agent`, then adds WeChat, reminders, diary writing, and random check-ins around it.
+Cyberboss builds on top of `timeline-for-agent`, then adds WeChat, reminders, diary writing, seedbox continuity, and random pulse wake-ups around it.
 
 <a id="technical-stack"></a>
 ## Technical Stack
@@ -80,8 +80,8 @@ Cyberboss builds on top of `timeline-for-agent`, then adds WeChat, reminders, di
   A pluggable runtime layer for Codex and Claude Code, with the same WeChat command surface and shared-thread workflow.
 - **Bridge**
   A WeChat HTTP bridge with long-poll synchronization for inbound messages, outbound replies, files, and status transitions.
-- **Task System**
-  Local queues for reminders, system triggers, and timeline screenshot jobs.
+- **Queue & Trigger System**
+  Local queues for reminders, pulse/check-in triggers, and timeline screenshot jobs, plus internal seedbox storage for future-useful carry-over material.
 - **Capability Layer**
   Timeline, diary, random check-ins, file delivery, and related runtime actions.
 - **Optional Tooling**
@@ -389,11 +389,13 @@ Common contents:
 - `reminder-queue.json`
   reminder queue
 - `system-message-queue.json`
-  system / check-in queue
+  system / pulse-trigger queue
 - `deferred-system-replies.json`
   replies waiting for the next usable WeChat context token
 - `checkin-config.json`
-  saved proactive check-in range
+  saved proactive pulse/check-in wake-up range
+- `seedbox.json`
+  future-useful internal carry-over material
 - `timeline-screenshot-queue.json`
   screenshot job queue
 - `diary/`
@@ -436,6 +438,10 @@ Agent-facing Cyberboss capabilities are project-native structured tools.
 ### Common project tools
 
 - `cyberboss_reminder_create`
+- `cyberboss_seedbox_create`
+- `cyberboss_seedbox_list`
+- `cyberboss_seedbox_update`
+- `cyberboss_seedbox_complete`
 - `cyberboss_diary_append`
 - `cyberboss_timeline_write`
 - `cyberboss_timeline_build`
@@ -475,7 +481,7 @@ Because the project is not published as an npm package yet. Clone the repo and r
 
 ### What exactly is `checkin`?
 
-`checkin` is the random wake-up mechanism. The system wakes the model at a random time and lets it decide whether to show up, stay silent, write data, or act.
+`checkin` is the legacy host-side name for the random wake-up mechanism. In model-facing semantics, that same behavior is `pulse`: the system wakes the model at a random time and lets it decide whether to show up, stay silent, write data, or act.
 
 ### Why set user name and gender before the first run?
 

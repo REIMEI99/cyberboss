@@ -36,6 +36,7 @@ The runtime can be `codex` or `claudecode`, but the documented command surface s
 - `thread.switch`
 - `thread.stop`
 - `system.checkin_range`
+  Host-side name for the pulse wake-up interval control.
 - `channel.chunk_min`
 
 ### Approvals & Control
@@ -76,6 +77,10 @@ Those capabilities are exposed as project-native structured tools:
 - `cyberboss_channel_send_file`
 - `cyberboss_diary_append`
 - `cyberboss_reminder_create`
+- `cyberboss_seedbox_create`
+- `cyberboss_seedbox_list`
+- `cyberboss_seedbox_update`
+- `cyberboss_seedbox_complete`
 - `cyberboss_system_send`
 - `cyberboss_timeline_write`
 - `cyberboss_timeline_build`
@@ -99,6 +104,7 @@ Notes:
 - `/stop`
 - `/switch <threadId>`
 - `/checkin <min>-<max>`
+  Adjust the host-side random pulse wake-up range for the current project.
 - `/chunk <number>`
 - `/yes`
 - `/always`
@@ -114,3 +120,4 @@ Notes:
 - there is no separate `/context` command; use `/status` and read the `📦 context` line
 - `/compact` asks the current thread to compact its context and reports start / finish back to WeChat
 - file sending is still available, but no longer exposed as a WeChat command
+- `checkin` remains the human-facing command/config term; the model-facing semantic term is `pulse`

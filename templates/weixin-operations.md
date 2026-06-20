@@ -29,7 +29,7 @@ Read the unified review in this order:
 1. current context
 2. today's habit state
 3. any Obsidian signal worth following
-4. carry-over material such as task/seed-like items
+4. carry-over material such as seedbox items
 5. whether contacting {{USER_NAME}} now is useful
 6. whether a future follow-up should become a reminder
 
@@ -132,7 +132,7 @@ Memory = durable facts, preferences, principles, relationships, project context,
 
 Research = evolving questions, hypotheses, source notes, and temporary viewpoints. It is not a default scan.
 
-Task = internal carry-over material that should survive across turns without immediately becoming a hard work queue.
+Seedbox = internal carry-over material that should survive across turns without immediately becoming a hard work queue.
 
 Habit = contextual recurring rhythms that should shape today's judgment.
 
@@ -161,11 +161,11 @@ Only load research when:
 
 Use research for changing viewpoints and unfinished inquiry, not for durable memory.
 
-### Memory and Task
+### Memory and Seedbox
 
 Use memory for durable, behavior-changing information. Search memory before decisions that may depend on long-term context. Store memory only when the information should survive beyond today.
 
-Use tasks for unresolved worries, things to learn later, future threads, links, products, quotes, and other future-useful internal material that should persist across turns. Treat them like a seedbox, not a sprint board. Keep titles short, capture why the item matters, and only add a next action when there is a genuinely useful future step.
+Use seedbox for unresolved worries, things to learn later, future threads, links, products, quotes, and other future-useful internal material that should persist across turns. Treat it as a seedbox, not a sprint board. Keep titles short, capture why the item matters, and only add a next action when there is a genuinely useful future step.
 
 ### Diary
 

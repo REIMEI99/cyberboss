@@ -186,9 +186,9 @@ async function maybeQueuePulseAudit(app, audit, runKey) {
     "An internal pulse-like turn just finished with action=silent.",
     `Turn intent: ${audit.turnIntent}`,
     audit.originalText ? `Trigger text: ${audit.originalText}` : "Trigger text: <none>",
-    "No observable state write was detected in tracked reminder, habit, memory, research, or task files.",
+    "No observable state write was detected in tracked reminder, habit, memory, research, or seedbox files.",
     "Re-check whether this turn actually completed one small private action or whether a useful action was skipped.",
-    "A small private action may be reminder creation, habit state action, seed capture, memory/research update, or another concrete maintenance step.",
+    "A small private action may be reminder creation, habit state action, seedbox capture, memory/research update, or another concrete maintenance step.",
     "If silence is still the right outcome because the review itself was sufficient, return silent again.",
     "Otherwise do one small private action now.",
   ].join("\n");
@@ -231,7 +231,7 @@ function normalizeText(value) {
 function captureSideEffectSnapshot(config) {
   const trackedPaths = [
     config?.reminderQueueFile,
-    config?.agentTaskFile,
+    config?.seedboxFile,
     config?.agentMemoryFile,
     config?.agentResearchFile,
     config?.habitDefinitionsFile,
