@@ -22,15 +22,22 @@ class SystemMessageDispatcher {
   }
 
   buildPreparedMessage(message, contextToken = "") {
+    const systemKind = normalizeSystemKind(message?.kind);
     return {
       provider: "system",
+      turnIntent: resolveSystemTurnIntent(systemKind),
+      systemKind,
       workspaceId: this.config.workspaceId,
       accountId: this.accountId,
       chatId: message.senderId,
       threadKey: `system:${message.senderId}`,
       senderId: message.senderId,
       messageId: message.id,
-      text: buildSystemInboundText(message?.text, message?.createdAt),
+      text: buildSystemInboundText({
+        text: message?.text,
+        createdAt: message?.createdAt,
+        systemKind,
+      }),
       attachments: [],
       command: "message",
       contextToken,
@@ -40,23 +47,26 @@ class SystemMessageDispatcher {
   }
 }
 
-function buildSystemInboundText(text, createdAt = "") {
+function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse" } = {}) {
   const body = normalizeText(text);
   const localTime = formatSystemLocalTime(createdAt);
+  const effectiveKind = normalizeSystemKind(systemKind);
   const sections = [
     ...(localTime ? [`[${localTime}]`, ""] : []),
     "SYSTEM ACTION MODE: internal trigger, not user chat.",
+    `Turn intent: ${resolveSystemTurnIntent(effectiveKind)}.`,
+    `System kind: ${effectiveKind}.`,
     "Tool families: memory = durable; research = evolving; stone box = shareable interesting finds; task = ongoing agent work; habit = recurring rhythms that should shape today's judgment.",
-    "Reminder is the default follow-up substrate. When the question is how to come back to something later, the first answer should usually be to schedule a reminder.",
-    "Pulse workflow step 1: context check. Figure out what the user is doing now, whether she is focused, stalled, tired, late on something, or likely to benefit from contact. Check whereabouts, recent context, timeline, diary, Obsidian, and memory as needed.",
-    "Pulse workflow step 2: habit check. Habit is a default pulse module, not an optional extra. Inspect today's habit state before deciding silence. If a habit has a good contextual opening, strongly consider a short low-shame message now.",
-    "Pulse workflow step 3: Obsidian fragment check. If the pulse includes an Obsidian fragment, treat it as a spark and decide whether it suggests something worth searching, feeding back, recording, or adding to the stone box.",
-    "Pulse workflow step 4: decision. Combine context, habit state, and any Obsidian spark. If you do not know what she is doing, if a reminder or habit opening is timely, if she seems stuck or unfocused, or if there is a useful small intervention, a short useful message is allowed.",
-    "Pulse workflow step 5: follow-up decision. Before finishing a pulse, explicitly decide whether this situation needs a reminder. If there is any plausible future checkpoint, unresolved thread, risk of delay, or value in checking back later, create the reminder by default. Only skip it when the situation is already fully resolved or another mechanism clearly covers it.",
-    "Research is not a default pulse scan. Only load research when an already-active research thread clearly matters to the present context, or when the Obsidian spark naturally points into ongoing investigation.",
-    "Priority 2: if you decide not to contact the user, you must still do one small private action. Do not choose silent until after doing useful private work or confirming there is truly nothing useful to do.",
-    "Good private pulse actions include: create a reminder, evaluate or mark a habit, refine a task next action, add a serendipitous find to the stone box, write diary, update timeline, prepare a private synthesis, or continue a clearly relevant research topic.",
-    "Return send_message when contacting the user now is useful. Return silent only after you have done private work and no message is useful now.",
+    "Reminder is the default follow-up substrate.",
+    "Prefer one unified first step. Start with cyberboss_pulse_review unless the trigger already gives you all needed context.",
+    effectiveKind === "reminder"
+      ? "This is a due reminder. Act on it now. Do not treat it as optional."
+      : "This is a pulse-like trigger. Review context, decide whether to contact the user, and decide follow-up.",
+    "Workflow: inspect context, inspect today's habit state when relevant, inspect any Obsidian signal, combine them into one decision, then make a follow-up decision.",
+    "Habit is important, but its default channel is reminder: if a habit is still incomplete today, either remind the user now or set a reminder to check later. Research is not a default scan.",
+    "If no message is useful, do one small private action before returning silent.",
+    "Prefer cyberboss_followup_decide whenever an open loop should become a reminder.",
+    "Return send_message when contacting the user now is useful. Return silent only after useful private work or a clear judgment that nothing useful should be done now.",
     "Return exactly one JSON object after any tool calls:",
     "{\"action\":\"silent\"}",
     "{\"action\":\"send_message\",\"message\":\"<one short natural WeChat message>\"}",
@@ -98,6 +108,21 @@ function normalizeIsoTime(value) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeSystemKind(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (!normalized) {
+    return "pulse";
+  }
+  if (["pulse", "reminder", "location", "checkin"].includes(normalized)) {
+    return normalized;
+  }
+  return "pulse";
+}
+
+function resolveSystemTurnIntent(systemKind) {
+  return normalizeSystemKind(systemKind) === "reminder" ? "reminder" : "pulse";
 }
 
 module.exports = { SystemMessageDispatcher };

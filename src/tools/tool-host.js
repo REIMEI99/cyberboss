@@ -12,20 +12,29 @@ class ProjectToolHost {
     this.extraToolHosts = createExtraToolHosts(services);
   }
 
-  listTools() {
-    const builtIn = PROJECT_TOOLS.map((tool) => ({
+  listTools({ profile = "full" } = {}) {
+    const normalizedProfile = normalizeToolProfile(profile);
+    const builtIn = PROJECT_TOOLS
+      .filter((tool) => isBuiltInToolVisible(tool.name, normalizedProfile))
+      .map((tool) => ({
       name: tool.name,
       description: buildToolDescription(tool),
       inputSchema: tool.inputSchema,
     }));
-    const extra = this.extraToolHosts.flatMap((host) => host.listTools());
+    const extra = normalizedProfile === "default"
+      ? []
+      : this.extraToolHosts.flatMap((host) => host.listTools());
     return [...builtIn, ...extra];
   }
 
   async invokeTool(toolName, args = {}, context = {}) {
+    const normalizedProfile = normalizeToolProfile(context.toolProfile || "full");
     const spec = PROJECT_TOOLS.find((candidate) => candidate.name === toolName);
     const normalizedArgs = args && typeof args === "object" ? args : {};
     if (spec) {
+      if (!isBuiltInToolVisible(toolName, normalizedProfile)) {
+        throw new Error(`Tool not available in the current profile: ${toolName}`);
+      }
       validateSchema(spec.inputSchema, normalizedArgs, toolName, "input");
       const resolvedContext = this.resolveContext(context);
       return await spec.handler({
@@ -35,7 +44,7 @@ class ProjectToolHost {
       });
     }
     for (const host of this.extraToolHosts) {
-      if (host.listTools().some((tool) => tool.name === toolName)) {
+      if (normalizedProfile !== "default" && host.listTools().some((tool) => tool.name === toolName)) {
         return await host.invokeTool(toolName, normalizedArgs);
       }
     }
@@ -67,7 +76,188 @@ function listProjectToolNames() {
   ];
 }
 
+const DEFAULT_HIDDEN_TOOL_NAMES = new Set([
+  "cyberboss_memory_list",
+  "cyberboss_research_upsert",
+  "cyberboss_research_search",
+  "cyberboss_research_list",
+  "cyberboss_research_archive",
+  "cyberboss_task_list",
+  "cyberboss_habit_list",
+  "cyberboss_habit_status_today",
+  "cyberboss_habit_history",
+  "cyberboss_habit_suggest_next_action",
+  "cyberboss_obsidian_status",
+  "cyberboss_obsidian_search",
+  "cyberboss_obsidian_recent",
+  "cyberboss_obsidian_read",
+  "cyberboss_obsidian_random_daily_excerpt",
+  "cyberboss_stone_box_search",
+  "cyberboss_stone_box_list",
+  "cyberboss_system_send",
+  "cyberboss_timeline_categories",
+  "cyberboss_timeline_proposals",
+  "cyberboss_timeline_build",
+  "cyberboss_timeline_serve",
+  "cyberboss_timeline_dev",
+]);
+
 const PROJECT_TOOLS = [
+  {
+    name: "cyberboss_pulse_review",
+    description: "Run the default pulse review flow in one step: inspect current context, habit status, an Obsidian signal, active agent work, and whether there is a good reason to message the user or set a follow-up reminder.",
+    shortHint: "Run the default pulse review flow.",
+    topics: ["pulse", "habit", "obsidian", "task", "stone-box", "reminder"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        turnIntent: { type: "string", description: "user_message, pulse, or reminder." },
+        context: { type: "string", description: "Current scene, recent conversation context, or what the user seems to be doing." },
+        userState: { type: "string", description: "Current inferred user state such as focused, low load, at home, after meal." },
+        obsidianQuery: { type: "string", description: "Optional query for targeted Obsidian search. If omitted, a random daily excerpt is preferred." },
+        includeObsidianExcerpt: { type: "boolean", description: "Whether to include a random daily-note excerpt when no query is provided. Defaults to true." },
+        includeTasks: { type: "boolean", description: "Whether to include active agent tasks. Defaults to true." },
+        includeStoneBox: { type: "boolean", description: "Whether to include active stone-box items. Defaults to true." },
+        includeMemories: { type: "boolean", description: "Whether to include a few recent durable memories. Defaults to true." },
+        allowResearch: { type: "boolean", description: "Reserved flag for future evolving-research integration. Defaults to false." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const turnIntent = normalizeTurnIntent(args.turnIntent);
+      const includeObsidianExcerpt = args.includeObsidianExcerpt !== false;
+      const includeTasks = args.includeTasks !== false;
+      const includeStoneBox = args.includeStoneBox !== false;
+      const includeMemories = args.includeMemories !== false;
+      const obsidianQuery = normalizeText(args.obsidianQuery);
+
+      const habitStatus = services.habit.statusToday({});
+      const habitSuggestion = services.habit.suggestNextAction({
+        context: args.context,
+        userState: args.userState,
+        limit: 3,
+      });
+
+      let obsidian = {
+        status: null,
+        source: obsidianQuery ? "search" : "daily_excerpt",
+        result: null,
+        error: "",
+      };
+      try {
+        obsidian.status = services.obsidian.getStatus();
+        if (obsidian.status?.configured && obsidian.status?.exists) {
+          if (obsidianQuery) {
+            obsidian.result = services.obsidian.search({ query: obsidianQuery, limit: 5 });
+          } else if (includeObsidianExcerpt) {
+            obsidian.result = services.obsidian.randomDailyExcerpt({});
+          }
+        }
+      } catch (error) {
+        obsidian.error = error?.message || String(error);
+      }
+
+      const memories = includeMemories
+        ? services.agentMemory.list({ limit: 5, includeArchived: false })
+        : { count: 0, memories: [] };
+      const tasks = includeTasks
+        ? services.agentTask.list({ limit: 5, includeDone: false })
+        : { count: 0, tasks: [] };
+      const stoneBox = includeStoneBox
+        ? services.stoneBox.list({ limit: 5, includeArchived: false })
+        : { count: 0, stones: [] };
+
+      const summary = buildPulseReviewSummary({
+        turnIntent,
+        context: args.context,
+        userState: args.userState,
+        habitStatus,
+        habitSuggestion,
+        obsidian,
+        memories,
+        tasks,
+        stoneBox,
+      });
+
+      return {
+        text: summary.messageOpportunity.shouldContactUser
+          ? "Pulse review found a plausible user-facing opening."
+          : "Pulse review completed with no strong user-facing opening.",
+        data: {
+          turnIntent,
+          currentContextSummary: summary.currentContextSummary,
+          habitStatus,
+          habitSuggestion,
+          obsidian,
+          memories,
+          tasks,
+          stoneBox,
+          messageOpportunity: summary.messageOpportunity,
+          followupOpportunity: summary.followupOpportunity,
+          recommendedPrivateActions: summary.recommendedPrivateActions,
+          researchPolicy: {
+            allowed: args.allowResearch === true,
+            exposedByDefault: false,
+          },
+        },
+      };
+    },
+  },
+  {
+    name: "cyberboss_followup_decide",
+    description: "Turn a follow-up judgment into the default action: create a reminder when later follow-up is warranted, otherwise record that no reminder is needed.",
+    shortHint: "Convert follow-up intent into a reminder decision.",
+    topics: ["reminder", "pulse", "task"],
+    inputSchema: {
+      type: "object",
+      required: ["summary"],
+      properties: {
+        summary: { type: "string", description: "Short reason for the follow-up decision." },
+        needsFollowup: { type: "boolean", description: "Whether a follow-up reminder should usually be created. Defaults to true." },
+        reminderText: { type: "string", description: "Exact reminder text. Falls back to summary." },
+        delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires." },
+        dueAt: { type: "string", description: "Absolute reminder time such as 2026-04-07T21:30+08:00." },
+        userId: { type: "string", description: "Optional explicit WeChat user id." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args, context }) {
+      const needsFollowup = args.needsFollowup !== false;
+      if (!needsFollowup) {
+        return {
+          text: "No reminder created.",
+          data: {
+            decision: "none",
+            reason: normalizeText(args.summary) || "Follow-up not needed.",
+          },
+        };
+      }
+
+      const reminderInput = {
+        text: normalizeText(args.reminderText) || normalizeText(args.summary),
+        userId: normalizeText(args.userId) || undefined,
+      };
+      if (Number.isInteger(args.delayMinutes)) {
+        reminderInput.delayMinutes = args.delayMinutes;
+      }
+      if (normalizeText(args.dueAt)) {
+        reminderInput.dueAt = normalizeText(args.dueAt);
+      }
+      if (!reminderInput.delayMinutes && !reminderInput.dueAt) {
+        reminderInput.delayMinutes = 180;
+      }
+
+      const reminder = await services.reminder.create(reminderInput, context);
+      return {
+        text: `Reminder queued: ${reminder.id}`,
+        data: {
+          decision: "reminder_created",
+          reason: normalizeText(args.summary) || "Follow-up requested.",
+          reminder,
+        },
+      };
+    },
+  },
   {
     name: "cyberboss_memory_remember",
     description: "Store a long-term structured memory that should influence future judgment. Do not use this for diary-like logs, tiny one-off details, or evolving research notes; use cyberboss_research_upsert for research.",
@@ -471,6 +661,30 @@ const PROJECT_TOOLS = [
       const result = services.habit.statusToday(args);
       return {
         text: `Habit status ${result.date}: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_habit_history",
+    description: "Read historical habit day-state data shaped for heatmaps, dashboards, or external plugins.",
+    shortHint: "Read habit history for analytics/heatmaps.",
+    topics: ["habit", "analytics"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        habitId: { type: "string" },
+        from: { type: "string", description: "Optional start date YYYY-MM-DD." },
+        to: { type: "string", description: "Optional end date YYYY-MM-DD." },
+        days: { type: "integer", description: "Optional trailing day window. Defaults to 120." },
+        includeArchived: { type: "boolean" },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.habit.history(args);
+      return {
+        text: `Habit history ${result.from} to ${result.to}: ${result.count} habits.`,
         data: result,
       };
     },
@@ -1319,8 +1533,149 @@ function createExtraToolHosts(services = {}) {
   return hosts;
 }
 
+function normalizeToolProfile(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (normalized === "default") {
+    return "default";
+  }
+  return "full";
+}
+
+function normalizeTurnIntent(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (normalized === "pulse" || normalized === "reminder") {
+    return normalized;
+  }
+  return "user_message";
+}
+
+function isBuiltInToolVisible(toolName, profile) {
+  const normalizedProfile = normalizeToolProfile(profile);
+  if (normalizedProfile !== "default") {
+    return true;
+  }
+  return !DEFAULT_HIDDEN_TOOL_NAMES.has(normalizeText(toolName));
+}
+
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function buildPulseReviewSummary({
+  turnIntent,
+  context,
+  userState,
+  habitStatus,
+  habitSuggestion,
+  obsidian,
+  memories,
+  tasks,
+  stoneBox,
+}) {
+  const incompleteHabits = Array.isArray(habitStatus?.habits)
+    ? habitStatus.habits.filter((item) => item?.dailyState === "incomplete")
+    : [];
+  const openTasks = Array.isArray(tasks?.tasks) ? tasks.tasks : [];
+  const activeStones = Array.isArray(stoneBox?.stones) ? stoneBox.stones : [];
+  const durableMemories = Array.isArray(memories?.memories) ? memories.memories : [];
+
+  const currentContextSummary = {
+    turnIntent,
+    context: normalizeText(context),
+    userState: normalizeText(userState),
+    incompleteHabitCount: incompleteHabits.length,
+    openTaskCount: openTasks.length,
+    activeStoneCount: activeStones.length,
+    memoryCount: durableMemories.length,
+    obsidianSource: normalizeText(obsidian?.source) || "none",
+    obsidianFound: detectObsidianSignal(obsidian),
+  };
+
+  const shouldContactForHabit = habitSuggestion?.shouldContactUser === true;
+  const shouldContactForReminder = turnIntent === "reminder";
+  const hasInterestingObsidianSignal = detectObsidianSignal(obsidian);
+  const shouldContactUser = shouldContactForReminder || shouldContactForHabit;
+  const topIncompleteHabit = incompleteHabits[0] || null;
+
+  const reasons = [];
+  if (shouldContactForReminder) {
+    reasons.push("a reminder is due now");
+  }
+  if (shouldContactForHabit) {
+    reasons.push(normalizeText(habitSuggestion?.reason) || "a habit nudge looks appropriate");
+  }
+  if (!reasons.length && hasInterestingObsidianSignal) {
+    reasons.push("Obsidian contains a potentially relevant signal, but it may only justify private review");
+  }
+  if (!reasons.length && openTasks.length) {
+    reasons.push("there are active internal tasks, but none clearly require interrupting the user");
+  }
+  if (!reasons.length) {
+    reasons.push("no strong interruption-worthy signal was found");
+  }
+
+  const recommendedPrivateActions = [];
+  let followupOpportunity = {
+    shouldSetReminder: false,
+    reason: "no habit- or context-based follow-up stood out",
+    reminderText: "",
+    suggestedDelayMinutes: null,
+  };
+  if (!shouldContactForReminder && incompleteHabits.length > 0) {
+    followupOpportunity = {
+      shouldSetReminder: true,
+      reason: shouldContactForHabit
+        ? "an incomplete habit matters today; either remind the user now or schedule a follow-up reminder"
+        : "at least one habit is still incomplete today, so a follow-up reminder is usually warranted",
+      reminderText: topIncompleteHabit
+        ? `Check whether ${topIncompleteHabit.habit.title} is still undone today, and either remind her or mark the day cleanly.`
+        : "Check whether today's remaining habits still need a reminder or a clean reset.",
+      suggestedDelayMinutes: shouldContactForHabit ? 90 : 180,
+    };
+  }
+  if (hasInterestingObsidianSignal && !shouldContactUser) {
+    recommendedPrivateActions.push("review the Obsidian result before deciding whether to message the user");
+  }
+  if (followupOpportunity.shouldSetReminder && !shouldContactForReminder) {
+    recommendedPrivateActions.push("set a reminder for today's incomplete habit instead of letting it disappear");
+  }
+  if (openTasks.length) {
+    recommendedPrivateActions.push("consider advancing one active agent task silently");
+  }
+  if (activeStones.length) {
+    recommendedPrivateActions.push("check whether a recent stone-box item should be connected to current context");
+  }
+  if (!recommendedPrivateActions.length) {
+    recommendedPrivateActions.push("stay silent and wait for a better trigger");
+  }
+
+  return {
+    currentContextSummary,
+    messageOpportunity: {
+      shouldContactUser,
+      primaryReason: reasons[0],
+      reasons,
+    },
+    followupOpportunity,
+    recommendedPrivateActions,
+  };
+}
+
+function detectObsidianSignal(obsidian) {
+  if (!obsidian || typeof obsidian !== "object") {
+    return false;
+  }
+  const result = obsidian.result;
+  if (!result || typeof result !== "object") {
+    return false;
+  }
+  if (result.found === true && normalizeText(result.excerpt)) {
+    return true;
+  }
+  if (Number.isInteger(result.resultCount) && result.resultCount > 0) {
+    return true;
+  }
+  return false;
 }
 
 function buildToolDescription(tool) {

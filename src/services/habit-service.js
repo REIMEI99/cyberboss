@@ -15,6 +15,7 @@ class HabitService {
     this.definitionsFile = config.habitDefinitionsFile;
     this.eventsFile = config.habitEventsFile;
     this.stateFile = config.habitStateFile;
+    this.heatmapFile = config.habitHeatmapFile;
     this.ensureParentDirectory();
     this.ensureDefinitionsFile();
     this.ensureEventsFile();
@@ -78,6 +79,50 @@ class HabitService {
       filePath: this.definitionsFile,
       count: habits.length,
       habits,
+    };
+  }
+
+  history({ habitId = "", from = "", to = "", days = 120, includeArchived = false } = {}) {
+    const range = resolveHistoryRange({ from, to, days });
+    const habits = this.listDefinitions({ includeArchived }).habits
+      .filter((habit) => !habitId || habit.id === normalizeText(habitId));
+    const habitIds = new Set(habits.map((habit) => habit.id));
+    const allEvents = this.loadEvents()
+      .filter((event) => habitIds.has(event.habitId))
+      .filter((event) => {
+        const dateKey = dateKeyFor(event.createdAt);
+        return dateKey >= range.from && dateKey <= range.to;
+      });
+    const dates = enumerateDateKeys(range.from, range.to);
+    const items = habits.map((habit) => buildHabitHistoryRow({
+      habit,
+      dates,
+      events: allEvents.filter((event) => event.habitId === habit.id),
+    }));
+    return {
+      filePath: this.heatmapFile,
+      from: range.from,
+      to: range.to,
+      days: dates.length,
+      count: items.length,
+      dates,
+      habits: items,
+    };
+  }
+
+  exportHeatmap(args = {}) {
+    const snapshot = this.history({
+      ...args,
+      includeArchived: args.includeArchived !== false,
+    });
+    const payload = {
+      updatedAt: new Date().toISOString(),
+      ...snapshot,
+    };
+    fs.writeFileSync(this.heatmapFile, JSON.stringify(payload, null, 2));
+    return {
+      filePath: this.heatmapFile,
+      ...payload,
     };
   }
 
@@ -207,6 +252,7 @@ class HabitService {
       updatedAt: new Date().toISOString(),
       ...state,
     }, null, 2));
+    this.writeHeatmapSnapshot();
   }
 
   statusTodayNoWrite() {
@@ -218,6 +264,14 @@ class HabitService {
       count: habits.length,
       habits: habits.map((habit) => buildHabitStatus(habit, events, Date.now())),
     };
+  }
+
+  writeHeatmapSnapshot() {
+    try {
+      this.exportHeatmap({ days: 365, includeArchived: true });
+    } catch {
+      // Keep habit writes resilient even if analytics export fails.
+    }
   }
 }
 
@@ -356,6 +410,66 @@ function buildHabitSuggestion(item) {
   };
 }
 
+function buildHabitHistoryRow({ habit, dates, events }) {
+  const eventsByDate = new Map();
+  for (const event of Array.isArray(events) ? events : []) {
+    const dateKey = dateKeyFor(event.createdAt);
+    if (!eventsByDate.has(dateKey)) {
+      eventsByDate.set(dateKey, []);
+    }
+    eventsByDate.get(dateKey).push(event);
+  }
+
+  const cells = dates.map((date) => {
+    const dayEvents = eventsByDate.get(date) || [];
+    const stateEvent = latestEvent(dayEvents.filter((event) => DAILY_STATE_EVENT_TYPES.has(event.type)));
+    const dailyState = normalizeDailyState(stateEvent?.type);
+    return {
+      date,
+      state: dailyState,
+      score: stateScoreFor(dailyState, dayEvents.length > 0),
+      eventCount: dayEvents.length,
+      stateEventType: stateEvent?.type || "",
+      lastEventAt: latestEvent(dayEvents)?.createdAt || "",
+    };
+  });
+
+  const summary = cells.reduce((accumulator, cell) => {
+    accumulator[cell.state] = (accumulator[cell.state] || 0) + 1;
+    if (cell.state === "done") {
+      accumulator.completionRateDenominator += 1;
+    }
+    if (cell.state === "incomplete" || cell.state === "abandoned" || cell.state === "done") {
+      accumulator.trackedDays += 1;
+    }
+    return accumulator;
+  }, {
+    done: 0,
+    incomplete: 0,
+    abandoned: 0,
+    none: 0,
+    trackedDays: 0,
+    completionRateDenominator: 0,
+  });
+
+  const completionRate = summary.trackedDays > 0
+    ? Number((summary.done / summary.trackedDays).toFixed(4))
+    : 0;
+
+  return {
+    habit,
+    summary: {
+      doneDays: summary.done,
+      incompleteDays: summary.incomplete,
+      abandonedDays: summary.abandoned,
+      emptyDays: summary.none,
+      trackedDays: summary.trackedDays,
+      completionRate,
+    },
+    cells,
+  };
+}
+
 function buildSuggestionReason(item) {
   const habit = item.habit;
   const bits = [`today state: ${item.dailyState || "incomplete"}`];
@@ -379,9 +493,25 @@ function normalizeDailyState(type) {
     case "skipped":
       return "abandoned";
     case "incomplete":
+      return "incomplete";
+    case "":
+      return "none";
     default:
       return "incomplete";
   }
+}
+
+function stateScoreFor(state, hasEvents) {
+  if (!hasEvents || state === "none") {
+    return null;
+  }
+  if (state === "done") {
+    return 1;
+  }
+  if (state === "abandoned") {
+    return -1;
+  }
+  return 0;
 }
 
 function buildMessageGuidance(habit) {
@@ -416,6 +546,53 @@ function dateKeyFor(value) {
   }).formatToParts(shifted);
   const part = (type) => parts.find((item) => item.type === type)?.value || "";
   return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+function resolveHistoryRange({ from = "", to = "", days = 120 } = {}) {
+  const normalizedFrom = normalizeDateKey(from);
+  const normalizedTo = normalizeDateKey(to);
+  if (normalizedFrom && normalizedTo && normalizedFrom <= normalizedTo) {
+    return { from: normalizedFrom, to: normalizedTo };
+  }
+  const dayCount = normalizeHistoryDays(days);
+  const endDate = normalizedTo ? dateFromDateKey(normalizedTo) : shiftedShanghaiDate(new Date());
+  const startDate = normalizedFrom
+    ? dateFromDateKey(normalizedFrom)
+    : new Date(endDate.getTime() - (dayCount - 1) * 24 * 60 * 60 * 1000);
+  const ordered = startDate.getTime() <= endDate.getTime()
+    ? { fromDate: startDate, toDate: endDate }
+    : { fromDate: endDate, toDate: startDate };
+  return {
+    from: dateKeyFor(ordered.fromDate),
+    to: dateKeyFor(ordered.toDate),
+  };
+}
+
+function enumerateDateKeys(from, to) {
+  const start = dateFromDateKey(from);
+  const end = dateFromDateKey(to);
+  const dates = [];
+  for (let cursor = start.getTime(); cursor <= end.getTime(); cursor += 24 * 60 * 60 * 1000) {
+    dates.push(dateKeyFor(new Date(cursor)));
+  }
+  return dates;
+}
+
+function normalizeHistoryDays(value) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 120;
+  }
+  return Math.min(parsed, 3660);
+}
+
+function dateFromDateKey(value) {
+  const normalized = normalizeDateKey(value) || dateKeyFor(new Date());
+  return new Date(`${normalized}T04:00:00+08:00`);
+}
+
+function shiftedShanghaiDate(value) {
+  return dateFromDateKey(dateKeyFor(value));
 }
 
 function normalizeDateKey(value) {

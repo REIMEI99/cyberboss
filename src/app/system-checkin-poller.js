@@ -7,7 +7,7 @@ const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("../
 const { SystemMessageQueueStore } = require("../core/system-message-queue-store");
 const { ObsidianService } = require("../services/obsidian-service");
 
-const INTERNAL_CHECKIN_TRIGGER_TEMPLATE = "A quiet pulse fires. First decide whether to contact %USER% now: if you do not know her situation, have finished research or stone-box finds not yet discussed, a habit has a good contextual opening, or she does not seem deeply focused on work, consider a short message. If you decide not to contact her, you still must do one small private action: inspect habits/tasks/research, continue or start research, explore context, update stone box, remember what matters, prepare a private note, or maintain diary/timeline.";
+const INTERNAL_CHECKIN_TRIGGER_TEMPLATE = "A quiet pulse fires. First review %USER%'s current context and decide whether contact is useful now: if you do not know her situation, have finished research or stone-box finds not yet discussed, a habit genuinely fits the current scene, or she seems stalled and a small intervention would help, consider a short message. If a habit is still incomplete but the timing is not right for contact, set yourself a reminder to check again later. If you decide not to contact her, you still must do one small private action: inspect context, review habits/tasks if relevant, continue or start research when justified, update stone box, remember what matters, prepare a private note, or maintain diary/timeline.";
 const CHECKIN_SYSTEM_MESSAGE_SOURCE = "checkin";
 const CHECKIN_SYSTEM_MESSAGE_TTL_MS = 30 * 60 * 1000;
 

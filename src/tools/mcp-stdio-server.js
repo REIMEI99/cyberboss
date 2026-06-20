@@ -1,7 +1,8 @@
 const fs = require("fs");
-function runToolMcpServer({ toolHost, runtimeId = "", workspaceRoot = "" }) {
+function runToolMcpServer({ toolHost, runtimeId = "", workspaceRoot = "", toolProfile = "default" }) {
   const reader = createMessageReader(process.stdin);
-  const toolCatalog = toolHost.listTools();
+  const resolveToolCatalog = () => toolHost.listTools({ profile: toolProfile });
+  const toolCatalog = resolveToolCatalog();
   const resources = buildToolResources(toolCatalog);
 
   reader.onMessage(async (message) => {
@@ -46,7 +47,7 @@ function runToolMcpServer({ toolHost, runtimeId = "", workspaceRoot = "" }) {
 
       if (method === "tools/list") {
         writeRpcResponse(id, {
-          tools: toolHost.listTools(),
+          tools: resolveToolCatalog(),
         }, reader.getMode());
         return;
       }
@@ -98,6 +99,7 @@ function runToolMcpServer({ toolHost, runtimeId = "", workspaceRoot = "" }) {
         const result = await toolHost.invokeTool(toolName, args, {
           runtimeId,
           workspaceRoot,
+          toolProfile,
         });
         logToolCall({
           toolName,

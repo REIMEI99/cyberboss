@@ -266,6 +266,7 @@ class CyberbossApp {
         accountId: this.activeAccountId,
         senderId,
         workspaceRoot,
+        kind: "pulse",
         text: triggerText,
         createdAt: normalizeIsoTime(point?.receivedAt) || normalizeIsoTime(point?.timestamp) || new Date().toISOString(),
       });
@@ -277,6 +278,7 @@ class CyberbossApp {
         accountId: this.activeAccountId,
         senderId,
         workspaceRoot,
+        kind: "pulse",
         text: buildLocationMovementSystemText(movementEvent),
         createdAt: normalizeIsoTime(movementEvent?.movedAt) || new Date().toISOString(),
       });
@@ -654,6 +656,8 @@ class CyberbossApp {
       messageId: prepared.messageId,
       contextToken: prepared.contextToken,
       provider: prepared.provider,
+      turnIntent: prepared.turnIntent,
+      systemKind: prepared.systemKind,
       originalText: prepared.originalText,
       text: prepared.text,
       attachments: Array.isArray(prepared.attachments) ? prepared.attachments : [],
@@ -701,6 +705,8 @@ class CyberbossApp {
           senderId: pendingDispatch.prepared.senderId,
           contextToken: pendingDispatch.prepared.contextToken,
           provider: pendingDispatch.prepared.provider,
+          turnIntent: pendingDispatch.prepared.turnIntent,
+          systemKind: pendingDispatch.prepared.systemKind,
           originalText: pendingDispatch.prepared.originalText,
           text: pendingDispatch.prepared.text,
           attachments: pendingDispatch.prepared.attachments,
@@ -911,6 +917,7 @@ class CyberbossApp {
           accountId: reminder.accountId,
           senderId: reminder.senderId,
           workspaceRoot: this.resolveReminderWorkspaceRoot(reminder),
+          kind: "reminder",
           text: buildReminderSystemTrigger(reminder, this.config),
           createdAt: new Date().toISOString(),
         });

@@ -7,6 +7,7 @@ function buildInboundDraft(normalized, { attachments = [], attachmentFailures = 
   const originalText = normalizeText(normalized?.text);
   return {
     ...normalized,
+    turnIntent: normalizeTurnIntent(normalized?.turnIntent) || "user_message",
     originalText,
     text: originalText,
     attachments: Array.isArray(attachments) ? attachments : [],
@@ -37,6 +38,7 @@ function buildMergedInboundPrepared({
     bindingKey,
     workspaceRoot,
     ...latest,
+    turnIntent: normalizeTurnIntent(latest?.turnIntent) || "user_message",
     originalText,
     text: originalText,
     attachments,
@@ -160,6 +162,8 @@ function clonePreparedInboundMessage(prepared) {
     messageId: prepared.messageId,
     contextToken: prepared.contextToken,
     provider: prepared.provider,
+    turnIntent: prepared.turnIntent,
+    systemKind: prepared.systemKind,
     originalText: prepared.originalText,
     text: prepared.text,
     attachments: Array.isArray(prepared.attachments) ? prepared.attachments : [],
@@ -188,6 +192,14 @@ function pushSectionBreak(lines) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function normalizeTurnIntent(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (["user_message", "pulse", "reminder", "system_trigger"].includes(normalized)) {
+    return normalized;
+  }
+  return "";
 }
 
 function formatWechatLocalTime(receivedAt) {
