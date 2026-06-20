@@ -11,6 +11,10 @@ async function handleCompletedOrFailedTurn(app, event, failureReplyTarget) {
   if (pendingOperation && pendingOperations?.delete) {
     pendingOperations.delete(completedRunKey);
   }
+  const pendingFollowupAudit = app.pendingFollowupAuditByRunKey?.get?.(completedRunKey) || null;
+  if (pendingFollowupAudit && app.pendingFollowupAuditByRunKey?.delete) {
+    app.pendingFollowupAuditByRunKey.delete(completedRunKey);
+  }
 
   const sessionStore = app.runtimeAdapter.getSessionStore();
   sessionStore.clearApprovalPrompt(event.payload.threadId);
@@ -52,6 +56,12 @@ async function handleCompletedOrFailedTurn(app, event, failureReplyTarget) {
         contextToken: pendingOperation.contextToken,
       }).catch(() => {});
     }
+    if (event.type === "runtime.turn.completed" && pendingFollowupAudit) {
+      await maybeQueueFollowupAudit(app, pendingFollowupAudit).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error || "unknown error");
+        console.error(`[cyberboss] followup audit failed ${message}`);
+      });
+    }
 
     const shouldKeepTyping = linked?.bindingKey && linked?.workspaceRoot
       ? (
@@ -67,6 +77,39 @@ async function handleCompletedOrFailedTurn(app, event, failureReplyTarget) {
       app.turnBoundaryScopeKeys.delete(scopeKey);
     }
   }
+}
+
+async function maybeQueueFollowupAudit(app, audit) {
+  const reminders = app.reminderQueue
+    .listAll()
+    .filter((reminder) => reminder.accountId === audit.accountId && reminder.senderId === audit.senderId);
+  const baselineIds = new Set(Array.isArray(audit.baselineReminderIds) ? audit.baselineReminderIds : []);
+  const hasNewReminder = reminders.some((reminder) => !baselineIds.has(reminder.id));
+  if (hasNewReminder) {
+    return false;
+  }
+
+  const text = [
+    "A user-message turn just finished.",
+    "The user described a likely future action or something that may need follow-up.",
+    `Original user text: ${audit.originalText}`,
+    "No new reminder was detected during that turn.",
+    "Re-check whether this open loop should become a reminder now.",
+    "Prefer cyberboss_followup_decide or cyberboss_reminder_create if later follow-up is warranted.",
+    "If the matter was already fully resolved in the reply and no follow-up is needed, return silent.",
+  ].join("\n");
+
+  app.systemMessageQueue.enqueue({
+    id: `followup-audit:${audit.threadId}:${audit.turnId}`,
+    accountId: audit.accountId,
+    senderId: audit.senderId,
+    workspaceRoot: audit.workspaceRoot,
+    kind: "pulse",
+    source: "followup_audit",
+    text,
+    createdAt: new Date().toISOString(),
+  });
+  return true;
 }
 
 function buildRunKey(threadId, turnId) {

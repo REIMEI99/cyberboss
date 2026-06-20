@@ -64,6 +64,7 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse" } =
       : "This is a pulse-like trigger. Review context, decide whether to contact the user, and decide follow-up.",
     "Workflow: inspect context, inspect today's habit state when relevant, inspect any Obsidian signal, combine them into one decision, then make a follow-up decision.",
     "Habit is important, but its default channel is reminder: if a habit is still incomplete today, either remind the user now or set a reminder to check later. Research is not a default scan.",
+    "If the user explicitly says a habit is done or already handled, prefer marking it done instead of leaving it conversational only.",
     "If no message is useful, do one small private action before returning silent.",
     "Prefer cyberboss_followup_decide whenever an open loop should become a reminder.",
     "Return send_message when contacting the user now is useful. Return silent only after useful private work or a clear judgment that nothing useful should be done now.",

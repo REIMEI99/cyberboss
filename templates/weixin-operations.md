@@ -124,6 +124,8 @@ Use direct habit tools only when you need more detail or need to mark state:
 3. `cyberboss_habit_mark_abandoned`
 4. `cyberboss_habit_log_event`
 
+If {{USER_NAME}} explicitly says the habit is done, completed, or already handled, prefer marking it with `cyberboss_habit_mark_done` instead of only replying in chat. Do not leave a finished habit in `incomplete` state just because the user confirmed it conversationally.
+
 Do not use habit tracking to create guilt, streak pressure, task-list bloat, or empty reminder spam.
 
 ## Obsidian

@@ -71,6 +71,11 @@ class ReminderQueueStore {
     const first = this.state.reminders[0];
     return Number.isFinite(first?.dueAtMs) ? first.dueAtMs : 0;
   }
+
+  listAll() {
+    this.load();
+    return this.state.reminders.map((reminder) => ({ ...reminder }));
+  }
 }
 
 function normalizeReminder(reminder) {

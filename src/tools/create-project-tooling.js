@@ -6,7 +6,8 @@ const { AgentResearchService } = require("../services/agent-research-service");
 const { AgentTaskService } = require("../services/agent-task-service");
 const { ChannelFileService } = require("../services/channel-file-service");
 const { DiaryService } = require("../services/diary-service");
-const { HabitService } = require("../services/habit-service");
+const { HabitProvider } = require("../habit/habit-provider");
+const { HabitService } = require("../habit/habit-service");
 const { ObsidianService } = require("../services/obsidian-service");
 const { ReminderService } = require("../services/reminder-service");
 const { StickerService } = require("../services/sticker-service");
@@ -28,12 +29,14 @@ function createProjectTooling(config, options = {}) {
     filePath: config.projectToolContextFile,
   });
   const channelFile = new ChannelFileService({ config, channelAdapter, sessionStore });
+  const habit = new HabitService(buildHabitServiceOptions(config));
   const services = {
     agentTask: new AgentTaskService({ config }),
     agentMemory: new AgentMemoryService({ config }),
     agentResearch: new AgentResearchService({ config }),
     diary: new DiaryService({ config }),
-    habit: new HabitService({ config }),
+    habit,
+    habitProvider: new HabitProvider({ habitService: habit }),
     obsidian: new ObsidianService({ config }),
     reminder: new ReminderService({ config, sessionStore }),
     stoneBox: new StoneBoxService({ config }),
@@ -67,6 +70,15 @@ function createProjectTooling(config, options = {}) {
     services,
     toolHost,
     runtimeContextStore,
+  };
+}
+
+function buildHabitServiceOptions(config) {
+  return {
+    definitionsFile: config.habitDefinitionsFile,
+    eventsFile: config.habitEventsFile,
+    stateFile: config.habitStateFile,
+    heatmapFile: config.habitHeatmapFile,
   };
 }
 

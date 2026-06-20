@@ -7,15 +7,24 @@ const HABIT_CADENCES = new Set(["daily"]);
 const EVENT_TYPES = new Set(["done", "incomplete", "abandoned", "skipped", "nudged", "deferred", "note"]);
 const DAILY_STATE_EVENT_TYPES = new Set(["done", "incomplete", "abandoned", "skipped"]);
 const DEFAULT_COOLDOWN_MINUTES = 180;
-const HABIT_DAY_RESET_HOUR = 4;
+const DEFAULT_HABIT_DAY_RESET_HOUR = 4;
+const DEFAULT_HABIT_TIMEZONE = "Asia/Shanghai";
 
-class HabitService {
-  constructor({ config }) {
-    this.config = config;
-    this.definitionsFile = config.habitDefinitionsFile;
-    this.eventsFile = config.habitEventsFile;
-    this.stateFile = config.habitStateFile;
-    this.heatmapFile = config.habitHeatmapFile;
+class HabitStateService {
+  constructor({
+    definitionsFile,
+    eventsFile,
+    stateFile,
+    heatmapFile,
+    timezone = DEFAULT_HABIT_TIMEZONE,
+    dayResetHour = DEFAULT_HABIT_DAY_RESET_HOUR,
+  } = {}) {
+    this.definitionsFile = normalizeRequiredPath(definitionsFile, "definitionsFile");
+    this.eventsFile = normalizeRequiredPath(eventsFile, "eventsFile");
+    this.stateFile = normalizeRequiredPath(stateFile, "stateFile");
+    this.heatmapFile = normalizeRequiredPath(heatmapFile, "heatmapFile");
+    this.timezone = normalizeText(timezone) || DEFAULT_HABIT_TIMEZONE;
+    this.dayResetHour = normalizeDayResetHour(dayResetHour);
     this.ensureParentDirectory();
     this.ensureDefinitionsFile();
     this.ensureEventsFile();
@@ -83,21 +92,29 @@ class HabitService {
   }
 
   history({ habitId = "", from = "", to = "", days = 120, includeArchived = false } = {}) {
-    const range = resolveHistoryRange({ from, to, days });
+    const range = resolveHistoryRange({
+      from,
+      to,
+      days,
+      timezone: this.timezone,
+      dayResetHour: this.dayResetHour,
+    });
     const habits = this.listDefinitions({ includeArchived }).habits
       .filter((habit) => !habitId || habit.id === normalizeText(habitId));
     const habitIds = new Set(habits.map((habit) => habit.id));
     const allEvents = this.loadEvents()
       .filter((event) => habitIds.has(event.habitId))
       .filter((event) => {
-        const dateKey = dateKeyFor(event.createdAt);
+        const dateKey = dateKeyFor(event.createdAt, this.timezone, this.dayResetHour);
         return dateKey >= range.from && dateKey <= range.to;
       });
-    const dates = enumerateDateKeys(range.from, range.to);
+    const dates = enumerateDateKeys(range.from, range.to, this.timezone, this.dayResetHour);
     const items = habits.map((habit) => buildHabitHistoryRow({
       habit,
       dates,
       events: allEvents.filter((event) => event.habitId === habit.id),
+      timezone: this.timezone,
+      dayResetHour: this.dayResetHour,
     }));
     return {
       filePath: this.heatmapFile,
@@ -127,11 +144,11 @@ class HabitService {
   }
 
   statusToday({ habitId = "", date = "" } = {}) {
-    const targetDate = normalizeDateKey(date) || dateKeyFor(new Date());
+    const targetDate = normalizeDateKey(date) || dateKeyFor(new Date(), this.timezone, this.dayResetHour);
     const habits = this.listDefinitions({ includeArchived: false }).habits
       .filter((habit) => !habitId || habit.id === normalizeText(habitId));
     const events = this.loadEvents()
-      .filter((event) => dateKeyFor(event.createdAt) === targetDate);
+      .filter((event) => dateKeyFor(event.createdAt, this.timezone, this.dayResetHour) === targetDate);
     const statuses = habits.map((habit) => buildHabitStatus(habit, events, Date.now()));
     const result = {
       date: targetDate,
@@ -185,31 +202,6 @@ class HabitService {
     return this.logEvent({ habitId, type: "abandoned", note, source, createdAt });
   }
 
-  suggestNextAction({ context = "", userState = "", limit = 3 } = {}) {
-    const nowMs = Date.now();
-    const status = this.statusToday({}).habits;
-    const normalizedContext = normalizeText(context).toLowerCase();
-    const normalizedUserState = normalizeText(userState).toLowerCase();
-    const candidates = status
-      .filter((item) => item.habit.status === "active")
-      .filter((item) => item.dailyState === "incomplete")
-      .map((item) => ({
-        ...item,
-        score: scoreHabitOpportunity(item, `${normalizedContext} ${normalizedUserState}`, nowMs),
-      }))
-      .filter((item) => item.score > 0)
-      .sort((left, right) => right.score - left.score || left.habit.title.localeCompare(right.habit.title))
-      .slice(0, normalizeLimit(limit));
-    const best = candidates[0] || null;
-    return {
-      shouldContactUser: Boolean(best && best.canNudge),
-      reason: best
-        ? buildSuggestionReason(best)
-        : "No active incomplete habit currently looks appropriate.",
-      suggestions: candidates.map(buildHabitSuggestion),
-    };
-  }
-
   loadDefinitions() {
     try {
       const raw = fs.readFileSync(this.definitionsFile, "utf8");
@@ -256,9 +248,9 @@ class HabitService {
   }
 
   statusTodayNoWrite() {
-    const targetDate = dateKeyFor(new Date());
+    const targetDate = dateKeyFor(new Date(), this.timezone, this.dayResetHour);
     const habits = this.listDefinitions({ includeArchived: false }).habits;
-    const events = this.loadEvents().filter((event) => dateKeyFor(event.createdAt) === targetDate);
+    const events = this.loadEvents().filter((event) => dateKeyFor(event.createdAt, this.timezone, this.dayResetHour) === targetDate);
     return {
       date: targetDate,
       count: habits.length,
@@ -367,53 +359,10 @@ function latestEvent(events) {
   return latest;
 }
 
-function scoreHabitOpportunity(status, context, nowMs) {
-  if (!status.canNudge) {
-    return 0;
-  }
-  const habit = status.habit;
-  let score = 1;
-  const avoidHit = habit.avoidContexts.some((item) => context.includes(item.toLowerCase()));
-  if (avoidHit) {
-    return 0;
-  }
-  for (const item of habit.contexts) {
-    if (context.includes(item.toLowerCase())) {
-      score += 3;
-    }
-  }
-  for (const item of habit.preferredWindows) {
-    if (context.includes(item.toLowerCase())) {
-      score += 2;
-    }
-  }
-  const hour = Number(new Intl.DateTimeFormat("en-US", {
-    timeZone: "Asia/Shanghai",
-    hour: "2-digit",
-    hour12: false,
-  }).format(new Date(nowMs)));
-  if (hour >= 10 && hour <= 23) {
-    score += 1;
-  }
-  return score;
-}
-
-function buildHabitSuggestion(item) {
-  const habit = item.habit;
-  return {
-    habitId: habit.id,
-    title: habit.title,
-    shouldContactUser: item.canNudge,
-    reason: buildSuggestionReason(item),
-    messageGuidance: buildMessageGuidance(habit),
-    fallbackPrivateAction: `Record why ${habit.title} was not nudged now, or update its context/cooldown if the timing was wrong.`,
-  };
-}
-
-function buildHabitHistoryRow({ habit, dates, events }) {
+function buildHabitHistoryRow({ habit, dates, events, timezone, dayResetHour }) {
   const eventsByDate = new Map();
   for (const event of Array.isArray(events) ? events : []) {
-    const dateKey = dateKeyFor(event.createdAt);
+    const dateKey = dateKeyFor(event.createdAt, timezone, dayResetHour);
     if (!eventsByDate.has(dateKey)) {
       eventsByDate.set(dateKey, []);
     }
@@ -470,21 +419,6 @@ function buildHabitHistoryRow({ habit, dates, events }) {
   };
 }
 
-function buildSuggestionReason(item) {
-  const habit = item.habit;
-  const bits = [`today state: ${item.dailyState || "incomplete"}`];
-  if (habit.preferredWindows.length) {
-    bits.push(`preferred windows: ${habit.preferredWindows.join(", ")}`);
-  }
-  if (habit.contexts.length) {
-    bits.push(`useful contexts: ${habit.contexts.join(", ")}`);
-  }
-  if (item.lastNudgeAt) {
-    bits.push(`last nudge: ${item.lastNudgeAt}`);
-  }
-  return bits.join("; ");
-}
-
 function normalizeDailyState(type) {
   switch (normalizeText(type).toLowerCase()) {
     case "done":
@@ -514,13 +448,6 @@ function stateScoreFor(state, hasEvents) {
   return 0;
 }
 
-function buildMessageGuidance(habit) {
-  const minimum = habit.minimumVersion
-    ? ` Offer the minimum viable version: ${habit.minimumVersion}.`
-    : " Offer a minimum viable version so this does not feel like a full task.";
-  return `Write one fresh, context-aware, low-shame message about "${habit.title}". Avoid repeating fixed wording.${minimum}`;
-}
-
 function compareHabits(left, right) {
   if (left.status !== right.status) {
     return statusRank(left.status) - statusRank(right.status);
@@ -532,14 +459,14 @@ function statusRank(status) {
   return { active: 0, paused: 1, archived: 2 }[status] ?? 3;
 }
 
-function dateKeyFor(value) {
+function dateKeyFor(value, timezone = DEFAULT_HABIT_TIMEZONE, dayResetHour = DEFAULT_HABIT_DAY_RESET_HOUR) {
   const date = value instanceof Date ? value : new Date(value);
   if (Number.isNaN(date.getTime())) {
     return "";
   }
-  const shifted = new Date(date.getTime() - HABIT_DAY_RESET_HOUR * 60 * 60 * 1000);
+  const shifted = new Date(date.getTime() - dayResetHour * 60 * 60 * 1000);
   const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: "Asia/Shanghai",
+    timeZone: timezone,
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
@@ -548,32 +475,40 @@ function dateKeyFor(value) {
   return `${part("year")}-${part("month")}-${part("day")}`;
 }
 
-function resolveHistoryRange({ from = "", to = "", days = 120 } = {}) {
+function resolveHistoryRange({
+  from = "",
+  to = "",
+  days = 120,
+  timezone = DEFAULT_HABIT_TIMEZONE,
+  dayResetHour = DEFAULT_HABIT_DAY_RESET_HOUR,
+} = {}) {
   const normalizedFrom = normalizeDateKey(from);
   const normalizedTo = normalizeDateKey(to);
   if (normalizedFrom && normalizedTo && normalizedFrom <= normalizedTo) {
     return { from: normalizedFrom, to: normalizedTo };
   }
   const dayCount = normalizeHistoryDays(days);
-  const endDate = normalizedTo ? dateFromDateKey(normalizedTo) : shiftedShanghaiDate(new Date());
+  const endDate = normalizedTo
+    ? dateFromDateKey(normalizedTo, timezone, dayResetHour)
+    : shiftedDateByRule(new Date(), timezone, dayResetHour);
   const startDate = normalizedFrom
-    ? dateFromDateKey(normalizedFrom)
+    ? dateFromDateKey(normalizedFrom, timezone, dayResetHour)
     : new Date(endDate.getTime() - (dayCount - 1) * 24 * 60 * 60 * 1000);
   const ordered = startDate.getTime() <= endDate.getTime()
     ? { fromDate: startDate, toDate: endDate }
     : { fromDate: endDate, toDate: startDate };
   return {
-    from: dateKeyFor(ordered.fromDate),
-    to: dateKeyFor(ordered.toDate),
+    from: dateKeyFor(ordered.fromDate, timezone, dayResetHour),
+    to: dateKeyFor(ordered.toDate, timezone, dayResetHour),
   };
 }
 
-function enumerateDateKeys(from, to) {
-  const start = dateFromDateKey(from);
-  const end = dateFromDateKey(to);
+function enumerateDateKeys(from, to, timezone = DEFAULT_HABIT_TIMEZONE, dayResetHour = DEFAULT_HABIT_DAY_RESET_HOUR) {
+  const start = dateFromDateKey(from, timezone, dayResetHour);
+  const end = dateFromDateKey(to, timezone, dayResetHour);
   const dates = [];
   for (let cursor = start.getTime(); cursor <= end.getTime(); cursor += 24 * 60 * 60 * 1000) {
-    dates.push(dateKeyFor(new Date(cursor)));
+    dates.push(dateKeyFor(new Date(cursor), timezone, dayResetHour));
   }
   return dates;
 }
@@ -586,13 +521,18 @@ function normalizeHistoryDays(value) {
   return Math.min(parsed, 3660);
 }
 
-function dateFromDateKey(value) {
-  const normalized = normalizeDateKey(value) || dateKeyFor(new Date());
-  return new Date(`${normalized}T04:00:00+08:00`);
+function dateFromDateKey(
+  value,
+  timezone = DEFAULT_HABIT_TIMEZONE,
+  dayResetHour = DEFAULT_HABIT_DAY_RESET_HOUR,
+) {
+  const normalized = normalizeDateKey(value) || dateKeyFor(new Date(), timezone, dayResetHour);
+  const hour = String(dayResetHour).padStart(2, "0");
+  return new Date(`${normalized}T${hour}:00:00+08:00`);
 }
 
-function shiftedShanghaiDate(value) {
-  return dateFromDateKey(dateKeyFor(value));
+function shiftedDateByRule(value, timezone = DEFAULT_HABIT_TIMEZONE, dayResetHour = DEFAULT_HABIT_DAY_RESET_HOUR) {
+  return dateFromDateKey(dateKeyFor(value, timezone, dayResetHour), timezone, dayResetHour);
 }
 
 function normalizeDateKey(value) {
@@ -628,14 +568,6 @@ function normalizePositiveInteger(value, fallback) {
   return Math.min(parsed, 1440);
 }
 
-function normalizeLimit(value) {
-  const parsed = Number.parseInt(String(value || ""), 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 3;
-  }
-  return Math.min(parsed, 20);
-}
-
 function normalizeIsoTime(value) {
   const normalized = normalizeText(value);
   if (!normalized) {
@@ -649,4 +581,25 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-module.exports = { HabitService };
+function normalizeRequiredPath(value, fieldName) {
+  const normalized = normalizeText(value);
+  if (!normalized) {
+    throw new Error(`HabitStateService requires ${fieldName}.`);
+  }
+  return path.resolve(normalized);
+}
+
+function normalizeDayResetHour(value) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 23) {
+    return DEFAULT_HABIT_DAY_RESET_HOUR;
+  }
+  return parsed;
+}
+
+module.exports = {
+  HabitStateService,
+  DEFAULT_COOLDOWN_MINUTES,
+  DEFAULT_HABIT_DAY_RESET_HOUR,
+  DEFAULT_HABIT_TIMEZONE,
+};

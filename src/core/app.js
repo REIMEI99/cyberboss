@@ -107,6 +107,7 @@ class CyberbossApp {
       onDeferredSystemReply: (payload) => this.deferSystemReply(payload),
     });
     this.pendingOperationByRunKey = new Map();
+    this.pendingFollowupAuditByRunKey = new Map();
     this.runtimeEventChain = Promise.resolve();
     this.runtimeAdapter.onEvent((event) => {
       this.threadStateStore.applyRuntimeEvent(event);
@@ -486,6 +487,12 @@ class CyberbossApp {
         provider: prepared.provider,
       };
       if (turn.turnId) {
+        this.trackPendingFollowupAudit({
+          turn,
+          prepared,
+          bindingKey,
+          workspaceRoot,
+        });
         this.streamDelivery.bindReplyTargetForTurn({
           threadId: turn.threadId,
           turnId: turn.turnId,
@@ -855,43 +862,37 @@ class CyberbossApp {
     return this.backgroundOps.flushPendingSystemMessages();
   }
 
+  trackPendingFollowupAudit({ turn, prepared, bindingKey, workspaceRoot }) {
+    const turnId = normalizeCommandArgument(turn?.turnId);
+    const threadId = normalizeCommandArgument(turn?.threadId);
+    if (!turnId || !threadId) {
+      return;
+    }
+    if (normalizeText(prepared?.turnIntent) !== "user_message") {
+      return;
+    }
+    const originalText = normalizeText(prepared?.originalText ?? prepared?.text);
+    if (!shouldAuditUserFollowup(originalText)) {
+      return;
+    }
+    const baselineReminderIds = this.reminderQueue
+      .listAll()
+      .filter((reminder) => reminder.accountId === prepared.accountId && reminder.senderId === prepared.senderId)
+      .map((reminder) => reminder.id);
+    this.pendingFollowupAuditByRunKey.set(buildRunKey(threadId, turnId), {
+      threadId,
+      turnId,
+      bindingKey,
+      workspaceRoot,
+      accountId: prepared.accountId,
+      senderId: prepared.senderId,
+      originalText,
+      baselineReminderIds,
+    });
+  }
+
   async flushPendingTimelineScreenshots(account) {
     return this.backgroundOps.flushPendingTimelineScreenshots(account);
-    const pendingJobs = this.timelineScreenshotQueue.drainForAccount(account.accountId);
-    for (const job of pendingJobs) {
-      try {
-        const captured = await this.projectServices.timeline.captureScreenshot({
-          outputFile: job.outputFile,
-          selector: job.selector,
-          range: job.range,
-          date: job.date,
-          week: job.week,
-          month: job.month,
-          category: job.category,
-          subcategory: job.subcategory,
-          width: job.width,
-          height: job.height,
-          sidePadding: job.sidePadding,
-          locale: job.locale,
-        });
-        await this.sendLocalFileToCurrentChat({
-          senderId: job.senderId,
-          filePath: captured.outputFile,
-        });
-      } catch (error) {
-        const messageText = error instanceof Error ? error.message : String(error || "unknown error");
-        console.error(`[cyberboss] timeline screenshot failed job=${job.id} ${messageText}`);
-        await this.channelAdapter.sendTyping({
-          userId: job.senderId,
-          status: 0,
-        }).catch(() => {});
-        await this.channelAdapter.sendText({
-          userId: job.senderId,
-          text: `❌ Timeline screenshot failed\n${messageText}`,
-          preserveBlock: true,
-        }).catch(() => {});
-      }
-    }
   }
 
   resolveLongPollTimeoutMs() {
@@ -1472,166 +1473,24 @@ class CyberbossApp {
     if (event.type === "runtime.turn.completed" || event.type === "runtime.turn.failed") {
       await this.runtimeEventOps.handleCompletedOrFailedTurn(event, failureReplyTarget);
       return;
-      const completedRunKey = buildRunKey(event.payload.threadId, event.payload.turnId);
-      const pendingOperations = this.pendingOperationByRunKey;
-      const pendingOperation = pendingOperations?.get?.(completedRunKey) || null;
-      if (pendingOperation && pendingOperations?.delete) {
-        pendingOperations.delete(completedRunKey);
-      }
-      const sessionStore = this.runtimeAdapter.getSessionStore();
-      sessionStore.clearApprovalPrompt(event.payload.threadId);
-      const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(event.payload.threadId);
-      const scopeKey = linked?.bindingKey && linked?.workspaceRoot
-        ? buildScopeKey(linked.bindingKey, linked.workspaceRoot)
-        : "";
-      if (scopeKey) {
-        this.turnBoundaryScopeKeys.add(scopeKey);
-      }
-      try {
-        this.turnGateStore.releaseThread(event.payload.threadId);
-        if (event.type === "runtime.turn.failed") {
-          await this.sendFailureToThread(
-            event.payload.threadId,
-            event.payload.text || "❌ Execution failed",
-            failureReplyTarget,
-          );
-        }
-        if (linked?.bindingKey && linked?.workspaceRoot) {
-          await this.flushPendingInboundMessages({
-            bindingKey: linked.bindingKey,
-            workspaceRoot: linked.workspaceRoot,
-            ignoreBoundary: true,
-          });
-        } else {
-          await this.flushPendingInboundMessages();
-        }
-        await this.flushPendingSystemMessages();
-        if (pendingOperation?.kind === "compact" && event.type === "runtime.turn.completed") {
-          await this.channelAdapter.sendText({
-            userId: pendingOperation.userId,
-            text: `✅ Compact finished\nthread: ${event.payload.threadId}`,
-            contextToken: pendingOperation.contextToken,
-          }).catch(() => {});
-        }
-        const shouldKeepTyping = linked?.bindingKey && linked?.workspaceRoot
-          ? (
-            this.turnGateStore.isPending(linked.bindingKey, linked.workspaceRoot)
-            || this.hasPendingInboundMessage(linked.bindingKey, linked.workspaceRoot)
-          )
-          : false;
-        if (!shouldKeepTyping) {
-          await this.stopTypingForThread(event.payload.threadId);
-        }
-      } finally {
-        if (scopeKey) {
-          this.turnBoundaryScopeKeys.delete(scopeKey);
-        }
-      }
-      return;
     }
     if (event.type !== "runtime.approval.requested") {
       return;
     }
     await this.approvalOps.handleApprovalRequested(event);
     return;
-    const sessionStore = this.runtimeAdapter.getSessionStore();
-    const linked = sessionStore.findBindingForThreadId(event.payload.threadId);
-    if (!linked?.workspaceRoot) {
-      return;
-    }
-    const allowlist = sessionStore.getApprovalCommandAllowlistForWorkspace(linked.workspaceRoot);
-    const shouldAutoApprove = isAutoApprovedStateDirOperation(event.payload, this.config)
-      || matchesBuiltInCommandPrefix(event.payload.commandTokens)
-      || matchesCommandPrefix(event.payload.commandTokens, allowlist);
-    if (!shouldAutoApprove) {
-      const promptState = sessionStore.getApprovalPromptState(event.payload.threadId);
-      const promptSignature = buildApprovalPromptSignature(event.payload);
-      if (promptState?.signature && promptState.signature === promptSignature) {
-        sessionStore.rememberApprovalPrompt(event.payload.threadId, event.payload.requestId, promptSignature);
-        console.log(
-          `[cyberboss] approval prompt deduped thread=${event.payload.threadId} requestId=${event.payload.requestId}`
-        );
-        return;
-      }
-      sessionStore.rememberApprovalPrompt(event.payload.threadId, event.payload.requestId, promptSignature);
-      await this.sendApprovalPrompt({
-        bindingKey: linked.bindingKey,
-        approval: event.payload,
-      }).catch((error) => {
-        sessionStore.clearApprovalPrompt(event.payload.threadId);
-        throw error;
-      });
-      return;
-    }
-    const approvalResponse = buildApprovalResponsePayload(event.payload, "yes");
-    if (!approvalResponse) {
-      sessionStore.clearApprovalPrompt(event.payload.threadId);
-      await this.sendApprovalPrompt({
-        bindingKey: linked.bindingKey,
-        approval: event.payload,
-      }).catch(() => {});
-      return;
-    }
-    await this.runtimeAdapter.respondApproval(approvalResponse).catch(() => {});
-    this.threadStateStore.resolveApproval(event.payload.threadId, "running");
   }
 
   async stopTypingForThread(threadId) {
     return this.threadNotify.stopTypingForThread(threadId);
-    const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(threadId);
-    const target = linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null;
-    if (!target) {
-      return;
-    }
-    await this.channelAdapter.sendTyping({
-      userId: target.userId,
-      status: 0,
-      contextToken: target.contextToken,
-    }).catch(() => {});
   }
 
   async sendFailureToThread(threadId, text, fallbackTarget = null) {
     return this.threadNotify.sendFailureToThread(threadId, text, fallbackTarget);
-    const linked = this.runtimeAdapter.getSessionStore().findBindingForThreadId(threadId);
-    const target = normalizeReplyTarget(
-      linked?.bindingKey ? this.resolveReplyTargetForBinding(linked.bindingKey) : null
-    ) || normalizeReplyTarget(fallbackTarget);
-    if (!target) {
-      return;
-    }
-    await this.channelAdapter.sendText({
-      userId: target.userId,
-      text: normalizeText(text) || "❌ Execution failed",
-      contextToken: target.contextToken,
-    }).catch(() => {});
   }
 
   async sendApprovalPrompt({ bindingKey, approval }) {
     return this.threadNotify.sendApprovalPrompt({ bindingKey, approval });
-    const target = this.resolveReplyTargetForBinding(bindingKey);
-    if (!target) {
-      console.warn(
-        `[cyberboss] approval prompt skipped binding=${bindingKey} requestId=${approval?.requestId || ""} reason=no_reply_target`
-      );
-      return;
-    }
-    console.log(
-      `[cyberboss] approval prompt sending binding=${bindingKey} user=${target.userId} requestId=${approval?.requestId || ""}`
-    );
-    await this.channelAdapter.sendTyping({
-      userId: target.userId,
-      status: 0,
-      contextToken: target.contextToken,
-    }).catch(() => {});
-    await this.channelAdapter.sendText({
-      userId: target.userId,
-      text: buildApprovalPromptText(approval),
-      contextToken: target.contextToken,
-      preserveBlock: true,
-    });
-    console.log(
-      `[cyberboss] approval prompt delivered binding=${bindingKey} user=${target.userId} requestId=${approval?.requestId || ""}`
-    );
   }
 
   async restoreBoundThreadSubscriptions() {
@@ -1698,6 +1557,21 @@ function normalizeReplyTarget(target) {
     contextToken: String(target.contextToken).trim(),
     provider: normalizeText(target.provider),
   };
+}
+
+function shouldAuditUserFollowup(text) {
+  const normalized = normalizeText(text).toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  const futureIntentPatterns = [
+    /(?:等会|待会|一会|稍后|晚点|之后|回头|明天|下次|今晚|等下)/u,
+    /(?:我要去|我去|我准备|我打算|我想去|我想做|我要做|我会去|我会做)/u,
+    /(?:记得|提醒我|别忘了|回头提醒)/u,
+    /\b(?:later|soon|afterwards|tomorrow|tonight|next time)\b/i,
+    /\b(?:i(?:'| a)?m going to|i will|i should|i need to|remind me|don't let me forget)\b/i,
+  ];
+  return futureIntentPatterns.some((pattern) => pattern.test(normalized));
 }
 
 function formatCompactNumber(value) {
