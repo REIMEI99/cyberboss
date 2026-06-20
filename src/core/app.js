@@ -33,6 +33,7 @@ const { TimelineScreenshotQueueStore } = require("./timeline-screenshot-queue-st
 const { TurnGateStore } = require("./turn-gate-store");
 const { ReminderQueueStore } = require("../adapters/channel/weixin/reminder-queue-store");
 const { createAppBackgroundOps } = require("./app-background-ops");
+const { createAppRuntimeEvents } = require("./app-runtime-events");
 const {
   matchesCommandPrefix,
   canonicalizeCommandTokens,
@@ -83,6 +84,7 @@ class CyberbossApp {
     this.pendingImageInboundByScope = new Map();
     this.turnBoundaryScopeKeys = new Set();
     this.backgroundOps = createAppBackgroundOps(this);
+    this.runtimeEventOps = createAppRuntimeEvents(this);
     this.systemMessageDispatcher = null;
     this.streamDelivery = new StreamDelivery({
       channelAdapter: this.channelAdapter,
@@ -1454,6 +1456,8 @@ class CyberbossApp {
       return;
     }
     if (event.type === "runtime.turn.completed" || event.type === "runtime.turn.failed") {
+      await this.runtimeEventOps.handleCompletedOrFailedTurn(event, failureReplyTarget);
+      return;
       const completedRunKey = buildRunKey(event.payload.threadId, event.payload.turnId);
       const pendingOperations = this.pendingOperationByRunKey;
       const pendingOperation = pendingOperations?.get?.(completedRunKey) || null;
