@@ -32,6 +32,7 @@ const { SystemMessageDispatcher } = require("./system-message-dispatcher");
 const { TimelineScreenshotQueueStore } = require("./timeline-screenshot-queue-store");
 const { TurnGateStore } = require("./turn-gate-store");
 const { ReminderQueueStore } = require("../adapters/channel/weixin/reminder-queue-store");
+const { createAppApprovals } = require("./app-approvals");
 const { createAppBackgroundOps } = require("./app-background-ops");
 const { createAppRuntimeEvents } = require("./app-runtime-events");
 const {
@@ -83,6 +84,13 @@ class CyberbossApp {
     this.pendingInboundByScope = new Map();
     this.pendingImageInboundByScope = new Map();
     this.turnBoundaryScopeKeys = new Set();
+    this.approvalOps = createAppApprovals(this, {
+      isAutoApprovedStateDirOperation,
+      matchesBuiltInCommandPrefix,
+      matchesCommandPrefix,
+      buildApprovalPromptSignature,
+      buildApprovalResponsePayload,
+    });
     this.backgroundOps = createAppBackgroundOps(this);
     this.runtimeEventOps = createAppRuntimeEvents(this);
     this.systemMessageDispatcher = null;
@@ -1518,6 +1526,8 @@ class CyberbossApp {
     if (event.type !== "runtime.approval.requested") {
       return;
     }
+    await this.approvalOps.handleApprovalRequested(event);
+    return;
     const sessionStore = this.runtimeAdapter.getSessionStore();
     const linked = sessionStore.findBindingForThreadId(event.payload.threadId);
     if (!linked?.workspaceRoot) {
