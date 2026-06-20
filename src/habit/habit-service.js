@@ -27,6 +27,10 @@ class HabitService {
     return this.stateService.statusToday(args);
   }
 
+  getTodayClosureSnapshot() {
+    return this.stateService.getTodayClosureSnapshot();
+  }
+
   logEvent(args = {}) {
     return this.stateService.logEvent(args);
   }

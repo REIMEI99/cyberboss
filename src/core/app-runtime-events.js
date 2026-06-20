@@ -15,6 +15,14 @@ async function handleCompletedOrFailedTurn(app, event, failureReplyTarget) {
   if (pendingFollowupAudit && app.pendingFollowupAuditByRunKey?.delete) {
     app.pendingFollowupAuditByRunKey.delete(completedRunKey);
   }
+  const pendingHabitAudit = app.pendingHabitAuditByRunKey?.get?.(completedRunKey) || null;
+  if (pendingHabitAudit && app.pendingHabitAuditByRunKey?.delete) {
+    app.pendingHabitAuditByRunKey.delete(completedRunKey);
+  }
+  const pendingPulseAudit = app.pendingPulseAuditByRunKey?.get?.(completedRunKey) || null;
+  if (pendingPulseAudit && app.pendingPulseAuditByRunKey?.delete) {
+    app.pendingPulseAuditByRunKey.delete(completedRunKey);
+  }
 
   const sessionStore = app.runtimeAdapter.getSessionStore();
   sessionStore.clearApprovalPrompt(event.payload.threadId);
@@ -62,6 +70,18 @@ async function handleCompletedOrFailedTurn(app, event, failureReplyTarget) {
         console.error(`[cyberboss] followup audit failed ${message}`);
       });
     }
+    if (event.type === "runtime.turn.completed" && pendingHabitAudit) {
+      await maybeQueueHabitAudit(app, pendingHabitAudit).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error || "unknown error");
+        console.error(`[cyberboss] habit audit failed ${message}`);
+      });
+    }
+    if (event.type === "runtime.turn.completed" && pendingPulseAudit) {
+      await maybeQueuePulseAudit(app, pendingPulseAudit, completedRunKey).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error || "unknown error");
+        console.error(`[cyberboss] pulse audit failed ${message}`);
+      });
+    }
 
     const shouldKeepTyping = linked?.bindingKey && linked?.workspaceRoot
       ? (
@@ -95,8 +115,10 @@ async function maybeQueueFollowupAudit(app, audit) {
     `Original user text: ${audit.originalText}`,
     "No new reminder was detected during that turn.",
     "Re-check whether this open loop should become a reminder now.",
+    "Do not leave the loop in a vague remembered state.",
     "Prefer cyberboss_followup_decide or cyberboss_reminder_create if later follow-up is warranted.",
-    "If the matter was already fully resolved in the reply and no follow-up is needed, return silent.",
+    "If no reminder is needed, that should be because the matter was already resolved or another mechanism clearly covers it.",
+    "Otherwise create the reminder now.",
   ].join("\n");
 
   app.systemMessageQueue.enqueue({
@@ -106,6 +128,78 @@ async function maybeQueueFollowupAudit(app, audit) {
     workspaceRoot: audit.workspaceRoot,
     kind: "pulse",
     source: "followup_audit",
+    text,
+    createdAt: new Date().toISOString(),
+  });
+  return true;
+}
+
+async function maybeQueueHabitAudit(app, audit) {
+  const current = app.projectServices?.habit?.getTodayClosureSnapshot?.();
+  const baseline = audit?.baselineHabitClosureSnapshot || null;
+  if (!current || !baseline) {
+    return false;
+  }
+  const hasClosureWrite = current.date !== baseline.date
+    || Number(current.stateEventCount) !== Number(baseline.stateEventCount)
+    || String(current.signature || "") !== String(baseline.signature || "");
+  if (hasClosureWrite) {
+    return false;
+  }
+
+  const text = [
+    "A user-message turn just finished.",
+    "The user said something that may imply a habit was completed, skipped, or cleanly abandoned for today.",
+    `Original user text: ${audit.originalText}`,
+    "No habit state change was detected during that turn.",
+    "Re-check whether a habit should now be marked done or abandoned.",
+    "Prefer cyberboss_habit_mark_done or cyberboss_habit_mark_abandoned when the user's statement was explicit enough.",
+    "If no habit state should be written, return silent.",
+  ].join("\n");
+
+  app.systemMessageQueue.enqueue({
+    id: `habit-audit:${audit.threadId}:${audit.turnId}`,
+    accountId: audit.accountId,
+    senderId: audit.senderId,
+    workspaceRoot: audit.workspaceRoot,
+    kind: "pulse",
+    source: "habit_audit",
+    text,
+    createdAt: new Date().toISOString(),
+  });
+  return true;
+}
+
+async function maybeQueuePulseAudit(app, audit, runKey) {
+  const delivery = app.streamDelivery?.consumeCompletedSystemReplyOutcome?.(runKey) || null;
+  if (!delivery || delivery.kind !== "silent") {
+    return false;
+  }
+  const baseline = audit?.baselineSideEffectSnapshot?.mtimes || {};
+  const current = captureSideEffectSnapshot(app.config).mtimes;
+  const changedPaths = Object.keys(current).filter((filePath) => Number(current[filePath] || 0) > Number(baseline[filePath] || 0));
+  if (changedPaths.length > 0) {
+    return false;
+  }
+
+  const text = [
+    "An internal pulse-like turn just finished with action=silent.",
+    `Turn intent: ${audit.turnIntent}`,
+    audit.originalText ? `Trigger text: ${audit.originalText}` : "Trigger text: <none>",
+    "No observable state write was detected in tracked reminder, habit, memory, research, task, or stone-box files.",
+    "Re-check whether this turn actually completed one small private action or whether a useful action was skipped.",
+    "A small private action may be reminder creation, habit state action, seed capture, memory/research update, or another concrete maintenance step.",
+    "If silence is still the right outcome because the review itself was sufficient, return silent again.",
+    "Otherwise do one small private action now.",
+  ].join("\n");
+
+  app.systemMessageQueue.enqueue({
+    id: `pulse-audit:${audit.threadId}:${audit.turnId}`,
+    accountId: audit.accountId,
+    senderId: audit.senderId,
+    workspaceRoot: audit.workspaceRoot,
+    kind: "pulse",
+    source: "pulse_audit",
     text,
     createdAt: new Date().toISOString(),
   });
@@ -132,6 +226,32 @@ function buildScopeKey(bindingKey, workspaceRoot) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function captureSideEffectSnapshot(config) {
+  const trackedPaths = [
+    config?.reminderQueueFile,
+    config?.agentTaskFile,
+    config?.agentMemoryFile,
+    config?.agentResearchFile,
+    config?.agentStoneBoxFile,
+    config?.habitDefinitionsFile,
+    config?.habitEventsFile,
+    config?.habitStateFile,
+  ].filter((value) => typeof value === "string" && value.trim());
+  const mtimes = {};
+  for (const filePath of trackedPaths) {
+    mtimes[filePath] = readMtimeMs(filePath);
+  }
+  return { mtimes };
+}
+
+function readMtimeMs(filePath) {
+  try {
+    return require("fs").statSync(filePath).mtimeMs || 0;
+  } catch {
+    return 0;
+  }
 }
 
 module.exports = {

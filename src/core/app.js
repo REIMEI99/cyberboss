@@ -85,6 +85,8 @@ class CyberbossApp {
     this.pendingInboundByScope = new Map();
     this.pendingImageInboundByScope = new Map();
     this.turnBoundaryScopeKeys = new Set();
+    this.pendingHabitAuditByRunKey = new Map();
+    this.pendingPulseAuditByRunKey = new Map();
     this.approvalOps = createAppApprovals(this, {
       isAutoApprovedStateDirOperation,
       matchesBuiltInCommandPrefix,
@@ -493,6 +495,18 @@ class CyberbossApp {
           bindingKey,
           workspaceRoot,
         });
+        this.trackPendingHabitAudit({
+          turn,
+          prepared,
+          bindingKey,
+          workspaceRoot,
+        });
+        this.trackPendingPulseAudit({
+          turn,
+          prepared,
+          bindingKey,
+          workspaceRoot,
+        });
         this.streamDelivery.bindReplyTargetForTurn({
           threadId: turn.threadId,
           turnId: turn.turnId,
@@ -888,6 +902,58 @@ class CyberbossApp {
       senderId: prepared.senderId,
       originalText,
       baselineReminderIds,
+    });
+  }
+
+  trackPendingHabitAudit({ turn, prepared, bindingKey, workspaceRoot }) {
+    const turnId = normalizeCommandArgument(turn?.turnId);
+    const threadId = normalizeCommandArgument(turn?.threadId);
+    if (!turnId || !threadId) {
+      return;
+    }
+    if (normalizeText(prepared?.turnIntent) !== "user_message") {
+      return;
+    }
+    const originalText = normalizeText(prepared?.originalText ?? prepared?.text);
+    if (!shouldAuditHabitClosure(originalText)) {
+      return;
+    }
+    const snapshot = this.projectServices?.habit?.getTodayClosureSnapshot?.();
+    if (!snapshot || Number(snapshot.habitCount) <= 0) {
+      return;
+    }
+    this.pendingHabitAuditByRunKey.set(buildRunKey(threadId, turnId), {
+      threadId,
+      turnId,
+      bindingKey,
+      workspaceRoot,
+      accountId: prepared.accountId,
+      senderId: prepared.senderId,
+      originalText,
+      baselineHabitClosureSnapshot: snapshot,
+    });
+  }
+
+  trackPendingPulseAudit({ turn, prepared, bindingKey, workspaceRoot }) {
+    const turnId = normalizeCommandArgument(turn?.turnId);
+    const threadId = normalizeCommandArgument(turn?.threadId);
+    if (!turnId || !threadId) {
+      return;
+    }
+    const turnIntent = normalizeText(prepared?.turnIntent);
+    if (!["pulse", "reminder", "system_trigger"].includes(turnIntent)) {
+      return;
+    }
+    this.pendingPulseAuditByRunKey.set(buildRunKey(threadId, turnId), {
+      threadId,
+      turnId,
+      bindingKey,
+      workspaceRoot,
+      accountId: prepared.accountId,
+      senderId: prepared.senderId,
+      turnIntent,
+      originalText: normalizeText(prepared?.originalText ?? prepared?.text),
+      baselineSideEffectSnapshot: captureSideEffectSnapshot(this.config),
     });
   }
 
@@ -1564,14 +1630,85 @@ function shouldAuditUserFollowup(text) {
   if (!normalized) {
     return false;
   }
-  const futureIntentPatterns = [
-    /(?:等会|待会|一会|稍后|晚点|之后|回头|明天|下次|今晚|等下)/u,
-    /(?:我要去|我去|我准备|我打算|我想去|我想做|我要做|我会去|我会做)/u,
-    /(?:记得|提醒我|别忘了|回头提醒)/u,
-    /\b(?:later|soon|afterwards|tomorrow|tonight|next time)\b/i,
-    /\b(?:i(?:'| a)?m going to|i will|i should|i need to|remind me|don't let me forget)\b/i,
+  const directFutureWords = [
+    "等会",
+    "待会",
+    "一会",
+    "稍后",
+    "晚点",
+    "之后",
+    "回头",
+    "明天",
+    "下次",
+    "今晚",
+    "等下",
+    "到时候",
+    "过会",
   ];
-  return futureIntentPatterns.some((pattern) => pattern.test(normalized));
+  const futureIntentPhrases = [
+    "我要去",
+    "我去",
+    "我准备",
+    "我打算",
+    "我想去",
+    "我想做",
+    "我要做",
+    "我会去",
+    "我会做",
+    "记得",
+    "记一下",
+    "提醒我",
+    "别忘了",
+    "回头提醒",
+    "之后提醒",
+  ];
+  const futureIntentPatterns = [
+    /\b(?:later|soon|afterwards|tomorrow|tonight|next time|eventually)\b/i,
+    /\b(?:i(?:'| a)?m going to|i will|i should|i need to|i plan to|remind me|don't let me forget)\b/i,
+  ];
+  return directFutureWords.some((item) => normalized.includes(item))
+    || futureIntentPhrases.some((item) => normalized.includes(item))
+    || futureIntentPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function shouldAuditHabitClosure(text) {
+  const normalized = normalizeText(text).toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+  const completionPatterns = [
+    /(?:鍋氬畬浜唡宸茬粡鍋氫簡|寮勫畬浜唡宸茬粡寮勪簡|鎼炲畾浜唡宸茬粡澶勭悊浜唡鍚冧簡|鍚冨畬浜唡鎵撳崱浜唡瀹屾垚浜?)/u,
+    /(?:浠婂ぉ涓嶅仛浜唡涓嶅仛浜唡绠椾簡|鍏堜笉鍋氫簡|鍏堜笉寮勪簡|鏀惧純浠婂ぉ|浠婂ぉ鍏堢畻浜?)/u,
+    /\b(?:done|finished|already did|already handled|took it|completed)\b/i,
+    /\b(?:not today|skip today|won't do it today|give up for today)\b/i,
+  ];
+  return completionPatterns.some((pattern) => pattern.test(normalized));
+}
+
+function captureSideEffectSnapshot(config) {
+  const trackedPaths = [
+    config?.reminderQueueFile,
+    config?.agentTaskFile,
+    config?.agentMemoryFile,
+    config?.agentResearchFile,
+    config?.agentStoneBoxFile,
+    config?.habitDefinitionsFile,
+    config?.habitEventsFile,
+    config?.habitStateFile,
+  ].filter((value) => typeof value === "string" && value.trim());
+  const mtimes = {};
+  for (const filePath of trackedPaths) {
+    mtimes[filePath] = readMtimeMs(filePath);
+  }
+  return { mtimes };
+}
+
+function readMtimeMs(filePath) {
+  try {
+    return fs.statSync(filePath).mtimeMs || 0;
+  } catch {
+    return 0;
+  }
 }
 
 function formatCompactNumber(value) {

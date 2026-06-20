@@ -20,6 +20,7 @@ class StreamDelivery {
     this.replyTargetQueueByThreadId = new Map();
     this.deferredReplyPrefixByBindingKey = new Map();
     this.stateByRunKey = new Map();
+    this.completedSystemReplyOutcomeByRunKey = new Map();
     this.runSequence = 0;
   }
 
@@ -100,6 +101,18 @@ class StreamDelivery {
       return null;
     }
     return normalizeReplyTarget(this.replyTargetByBindingKey.get(linked.bindingKey));
+  }
+
+  consumeCompletedSystemReplyOutcome(runKey = "") {
+    const normalizedRunKey = normalizeText(runKey);
+    if (!normalizedRunKey) {
+      return null;
+    }
+    const outcome = this.completedSystemReplyOutcomeByRunKey.get(normalizedRunKey) || null;
+    if (outcome) {
+      this.completedSystemReplyOutcomeByRunKey.delete(normalizedRunKey);
+    }
+    return outcome;
   }
 
   async handleRuntimeEvent(event) {
@@ -326,6 +339,7 @@ class StreamDelivery {
     const resolved = resolveSystemReplyDelivery(replyText, this.systemReplyPolicy);
     if (resolved.kind === "silent") {
       this.markAllItemsSent(state);
+      this.completedSystemReplyOutcomeByRunKey.set(state.runKey, { kind: "silent" });
       console.log(
         `[cyberboss] suppressed system reply thread=${state.threadId} action=silent preview=${JSON.stringify(replyText.slice(0, 120))}`
       );
@@ -342,6 +356,7 @@ class StreamDelivery {
     state.sendChain = state.sendChain.then(async () => {
       await this.sendSystemReply(state, resolved.message);
       this.markAllItemsSent(state);
+      this.completedSystemReplyOutcomeByRunKey.set(state.runKey, { kind: "send_message" });
     }).catch((error) => {
       console.error(`[cyberboss] failed to deliver system reply thread=${state.threadId}: ${error.message}`);
     });

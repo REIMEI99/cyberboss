@@ -162,6 +162,24 @@ class HabitStateService {
     };
   }
 
+  getTodayClosureSnapshot() {
+    const state = this.statusTodayNoWrite();
+    const date = state.date;
+    const stateEvents = this.loadEvents()
+      .filter((event) => DAILY_STATE_EVENT_TYPES.has(event.type))
+      .filter((event) => dateKeyFor(event.createdAt, this.timezone, this.dayResetHour) === date);
+    const signature = state.habits
+      .map((item) => `${item?.habit?.id || ""}:${item?.dailyState || "none"}`)
+      .sort()
+      .join("|");
+    return {
+      date,
+      habitCount: Array.isArray(state.habits) ? state.habits.length : 0,
+      stateEventCount: stateEvents.length,
+      signature,
+    };
+  }
+
   logEvent(input = {}) {
     const habitId = normalizeText(input.habitId);
     const type = normalizeChoice(input.type, EVENT_TYPES, "");

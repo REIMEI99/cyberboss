@@ -104,7 +104,7 @@ const DEFAULT_HIDDEN_TOOL_NAMES = new Set([
 const PROJECT_TOOLS = [
   {
     name: "cyberboss_pulse_review",
-    description: "Run the default pulse review flow in one step: inspect current context, habit status, an Obsidian signal, active agent work, and whether there is a good reason to message the user or set a follow-up reminder.",
+    description: "Run the default pulse review flow in one step: inspect current context, habit status, an Obsidian signal, future material worth revisiting, and whether there is a good reason to message the user or set a follow-up reminder.",
     shortHint: "Run the default pulse review flow.",
     topics: ["pulse", "habit", "obsidian", "task", "stone-box", "reminder"],
     inputSchema: {
@@ -115,7 +115,7 @@ const PROJECT_TOOLS = [
         userState: { type: "string", description: "Current inferred user state such as focused, low load, at home, after meal." },
         obsidianQuery: { type: "string", description: "Optional query for targeted Obsidian search. If omitted, a random daily excerpt is preferred." },
         includeObsidianExcerpt: { type: "boolean", description: "Whether to include a random daily-note excerpt when no query is provided. Defaults to true." },
-        includeTasks: { type: "boolean", description: "Whether to include active agent tasks. Defaults to true." },
+        includeTasks: { type: "boolean", description: "Whether to include active internal carry-over items. Defaults to true." },
         includeStoneBox: { type: "boolean", description: "Whether to include active stone-box items. Defaults to true." },
         includeMemories: { type: "boolean", description: "Whether to include a few recent durable memories. Defaults to true." },
         allowResearch: { type: "boolean", description: "Reserved flag for future evolving-research integration. Defaults to false." },
@@ -488,21 +488,21 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_task_create",
-    description: "Create a structured internal agent task for autonomous exploration, research, memory, follow-up, or maintenance.",
-    shortHint: "Create an internal agent task.",
+    description: "Create a structured internal carry-over item for unresolved, unexpanded, or future-useful material the agent should not lose across turns.",
+    shortHint: "Create an internal carry-over item.",
     topics: ["task", "memory", "research"],
     inputSchema: {
       type: "object",
       required: ["kind", "title", "goal"],
       properties: {
         kind: { type: "string", description: "explore, research, remember, followup, or maintenance." },
-        title: { type: "string", description: "Short task title." },
-        goal: { type: "string", description: "What this task is trying to accomplish." },
+        title: { type: "string", description: "Short carry-over title." },
+        goal: { type: "string", description: "Why this item should survive and what future value it may hold." },
         status: { type: "string", description: "pending, active, waiting, done, or cancelled. Defaults to pending." },
         priority: { type: "string", description: "low, normal, or high. Defaults to normal." },
-        dueAt: { type: "string", description: "Optional ISO datetime for when this task should next matter." },
-        nextAction: { type: "string", description: "The smallest useful next action." },
-        deliverable: { type: "string", description: "silent, message, diary, timeline, briefing, or file." },
+        dueAt: { type: "string", description: "Optional ISO datetime for when this item may next matter." },
+        nextAction: { type: "string", description: "Optional smallest useful next step if the item becomes active later." },
+        deliverable: { type: "string", description: "silent, message, diary, timeline, briefing, or file, if this item later turns into concrete output." },
         tags: { type: "array", items: { type: "string" } },
         notes: { type: "string" },
       },
@@ -518,8 +518,8 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_task_list",
-    description: "List structured internal agent tasks. Use this during pulse/check-in before deciding what autonomous action to take.",
-    shortHint: "List internal agent tasks.",
+    description: "List structured internal carry-over items. Use this when checking what unresolved or future-useful material the agent should keep alive across turns.",
+    shortHint: "List internal carry-over items.",
     topics: ["task", "memory", "research"],
     inputSchema: {
       type: "object",
@@ -541,8 +541,8 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_task_update",
-    description: "Update a structured internal agent task after making progress or changing the next action.",
-    shortHint: "Update an internal agent task.",
+    description: "Update a structured internal carry-over item after it becomes clearer, more relevant, or less useful.",
+    shortHint: "Update an internal carry-over item.",
     topics: ["task", "memory", "research"],
     inputSchema: {
       type: "object",
@@ -572,8 +572,8 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_task_complete",
-    description: "Mark a structured internal agent task as done.",
-    shortHint: "Complete an internal agent task.",
+    description: "Mark a structured internal carry-over item as resolved, exhausted, or no longer worth keeping active.",
+    shortHint: "Complete an internal carry-over item.",
     topics: ["task", "memory", "research"],
     inputSchema: {
       type: "object",
@@ -619,14 +619,14 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_reminder_create",
-    description: "Create a reminder in Cyberboss.",
-    shortHint: "Create a reminder with direct text plus delayMinutes or dueAt.",
+    description: "Create a reminder as a future follow-up anchor in Cyberboss. Use this when the system should come back to an open loop later.",
+    shortHint: "Create a follow-up reminder with direct text plus delayMinutes or dueAt.",
     topics: ["reminder"],
     inputSchema: {
       type: "object",
       required: ["text"],
       properties: {
-        text: { type: "string", description: "Reminder text to send back later." },
+        text: { type: "string", description: "Reminder text that preserves the future follow-up hook." },
         delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires." },
         dueAt: { type: "string", description: "Absolute time such as 2026-04-07T21:30+08:00." },
         userId: { type: "string", description: "Optional explicit WeChat user id." },
@@ -1368,7 +1368,7 @@ function buildPulseReviewSummary({
     reasons.push("Obsidian contains a potentially relevant signal, but it may only justify private review");
   }
   if (!reasons.length && openTasks.length) {
-    reasons.push("there are active internal tasks, but none clearly require interrupting the user");
+    reasons.push("there is internal carry-over material worth keeping in view, but none clearly requires interrupting the user");
   }
   if (!reasons.length) {
     reasons.push("no strong interruption-worthy signal was found");
@@ -1400,7 +1400,7 @@ function buildPulseReviewSummary({
     recommendedPrivateActions.push("set a reminder for today's incomplete habit instead of letting it disappear");
   }
   if (openTasks.length) {
-    recommendedPrivateActions.push("consider advancing one active agent task silently");
+    recommendedPrivateActions.push("review whether one internal carry-over item should be clarified, preserved, or quietly advanced");
   }
   if (activeStones.length) {
     recommendedPrivateActions.push("check whether a recent stone-box item should be connected to current context");
