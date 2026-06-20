@@ -32,6 +32,7 @@ const { SystemMessageDispatcher } = require("./system-message-dispatcher");
 const { TimelineScreenshotQueueStore } = require("./timeline-screenshot-queue-store");
 const { TurnGateStore } = require("./turn-gate-store");
 const { ReminderQueueStore } = require("../adapters/channel/weixin/reminder-queue-store");
+const { createAppBackgroundOps } = require("./app-background-ops");
 const {
   matchesCommandPrefix,
   canonicalizeCommandTokens,
@@ -81,6 +82,7 @@ class CyberbossApp {
     this.pendingInboundByScope = new Map();
     this.pendingImageInboundByScope = new Map();
     this.turnBoundaryScopeKeys = new Set();
+    this.backgroundOps = createAppBackgroundOps(this);
     this.systemMessageDispatcher = null;
     this.streamDelivery = new StreamDelivery({
       channelAdapter: this.channelAdapter,
@@ -834,20 +836,11 @@ class CyberbossApp {
   }
 
   async flushPendingSystemMessages() {
-    const pendingMessages = this.systemMessageDispatcher?.drainPending() || [];
-    for (const message of pendingMessages) {
-      try {
-        const dispatched = await this.dispatchSystemMessage(message);
-        if (!dispatched) {
-          this.systemMessageDispatcher.requeue(message);
-        }
-      } catch {
-        this.systemMessageDispatcher?.requeue(message);
-      }
-    }
+    return this.backgroundOps.flushPendingSystemMessages();
   }
 
   async flushPendingTimelineScreenshots(account) {
+    return this.backgroundOps.flushPendingTimelineScreenshots(account);
     const pendingJobs = this.timelineScreenshotQueue.drainForAccount(account.accountId);
     for (const job of pendingJobs) {
       try {
@@ -906,28 +899,7 @@ class CyberbossApp {
   }
 
   async flushDueReminders(account) {
-    const dueReminders = this.reminderQueue
-      .listDue(Date.now())
-      .filter((reminder) => reminder.accountId === account.accountId);
-
-    for (const reminder of dueReminders) {
-      try {
-        this.systemMessageQueue.enqueue({
-          id: `reminder:${reminder.id}`,
-          accountId: reminder.accountId,
-          senderId: reminder.senderId,
-          workspaceRoot: this.resolveReminderWorkspaceRoot(reminder),
-          kind: "reminder",
-          text: buildReminderSystemTrigger(reminder, this.config),
-          createdAt: new Date().toISOString(),
-        });
-      } catch {
-        this.reminderQueue.enqueue({
-          ...reminder,
-          dueAtMs: Date.now() + 5_000,
-        });
-      }
-    }
+    return this.backgroundOps.flushDueReminders(account);
   }
 
   resolveReminderWorkspaceRoot(reminder) {
@@ -2165,12 +2137,6 @@ function buildElicitationApprovalPromptText(approval) {
   }
 
   return out.join("\n");
-}
-
-function buildReminderSystemTrigger(reminder, config = {}) {
-  const reminderText = String(reminder?.text || "").trim();
-  const userName = String(config?.userName || "").trim() || "the user";
-  return `Due reminder for ${userName}: ${reminderText}`;
 }
 
 function buildScopeKey(bindingKey, workspaceRoot) {
