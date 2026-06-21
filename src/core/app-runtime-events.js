@@ -116,7 +116,8 @@ async function maybeQueueFollowupAudit(app, audit) {
     "No new reminder was detected during that turn.",
     "Re-check whether this open loop should become a reminder now.",
     "Do not leave the loop in a vague remembered state.",
-    "Prefer cyberboss_followup_decide or cyberboss_reminder_create if later follow-up is warranted.",
+    "Prefer cyberboss_followup_decide or cyberboss_reminder_create unless there is a clear reason no reminder is needed.",
+    "If the user mentioned a future checkpoint, delay, revisit, pending concern, or something easy to forget, default to creating the reminder now.",
     "If no reminder is needed, that should be because the matter was already resolved or another mechanism clearly covers it.",
     "Otherwise create the reminder now.",
   ].join("\n");

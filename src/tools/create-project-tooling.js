@@ -13,6 +13,7 @@ const { SeedboxService } = require("../services/seedbox-service");
 const { StickerService } = require("../services/sticker-service");
 const { SystemMessageService } = require("../services/system-message-service");
 const { TimelineService } = require("../services/timeline-service");
+const { TitlePoolService } = require("../services/title-pool-service");
 const { RuntimeContextStore } = require("./runtime-context-store");
 const { ProjectToolHost } = require("./tool-host");
 const { WhereaboutsService } = require("whereabouts-mcp");
@@ -38,6 +39,7 @@ function createProjectTooling(config, options = {}) {
     habitProvider: new HabitProvider({ habitService: habit }),
     obsidian: new ObsidianService({ config }),
     reminder: new ReminderService({ config, sessionStore }),
+    titlePool: new TitlePoolService({ config }),
     system: new SystemMessageService({ config, sessionStore }),
     channelFile,
     sticker: new StickerService({ config, channelAdapter, sessionStore, channelFileService: channelFile }),

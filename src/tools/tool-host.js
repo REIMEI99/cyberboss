@@ -93,6 +93,7 @@ const DEFAULT_HIDDEN_TOOL_NAMES = new Set([
   "cyberboss_obsidian_status",
   "cyberboss_obsidian_recent",
   "cyberboss_obsidian_random_daily_excerpt",
+  "cyberboss_title_pool_list",
   "cyberboss_system_send",
   "cyberboss_timeline_categories",
   "cyberboss_timeline_proposals",
@@ -294,6 +295,106 @@ const PROJECT_TOOLS = [
           reminder,
         },
       };
+    },
+  },
+  {
+    name: "cyberboss_title_pool_add",
+    description: "Add one short action title to the lightweight title pool. Use this for sudden short action utterances that should not be lost, without forcing a reminder or seedbox decision yet.",
+    shortHint: "Add a short action title to title pool.",
+    topics: ["pool", "reminder", "seedbox"],
+    inputSchema: {
+      type: "object",
+      required: ["title"],
+      properties: {
+        title: { type: "string", description: "Short action title such as 去洗澡, 收衣服, or 吃甘氨酸镁." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.titlePool.add(args);
+      return {
+        text: `Title pool item stored: ${result.title}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_title_pool_list",
+    description: "List the lightweight title pool. Read this when checking short current-action titles the model should keep in view without over-structuring them.",
+    shortHint: "List title pool items.",
+    topics: ["pool", "reminder", "seedbox"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Optional maximum item count. Defaults to 20." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.titlePool.list(args);
+      return {
+        text: `Title pool items loaded: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_title_pool_remove",
+    description: "Remove one title pool item by id after it is done, no longer relevant, or has been promoted elsewhere.",
+    shortHint: "Remove one title pool item.",
+    topics: ["pool"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string", description: "Title pool item id." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.titlePool.remove(args);
+      return {
+        text: `Title pool item removed: ${result.title}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_title_pool_promote_to_reminder",
+    description: "Promote one title pool item into a reminder, then remove it from the title pool. Use this when a lightweight current-action title becomes a real future follow-up obligation.",
+    shortHint: "Promote a title pool item to reminder.",
+    topics: ["pool", "reminder"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string", description: "Title pool item id." },
+        delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires." },
+        dueAt: { type: "string", description: "Absolute time such as 2026-04-07T21:30+08:00." },
+        userId: { type: "string", description: "Optional explicit WeChat user id." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args, context }) {
+      const item = services.titlePool.remove({ id: args.id });
+      try {
+        const reminder = await services.reminder.create({
+          text: item.title,
+          delayMinutes: args.delayMinutes,
+          dueAt: args.dueAt,
+          userId: args.userId,
+        }, context);
+        return {
+          text: `Title pool item promoted to reminder: ${item.title}`,
+          data: {
+            item,
+            reminder,
+          },
+        };
+      } catch (error) {
+        services.titlePool.add({ title: item.title });
+        throw error;
+      }
     },
   },
   {

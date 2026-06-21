@@ -49,6 +49,10 @@ Prefer `cyberboss_followup_decide` as the default way to turn an open loop into 
 
 If no reminder is created, that should be because no follow-up is actually needed or another mechanism clearly covers it, not because the loop was left vague.
 
+Default bias: if the user mentioned a future checkpoint, a likely delay, an unresolved thread, something easy to forget, or something worth checking back on, create the reminder unless there is a clear reason not to.
+
+Do not treat reminder creation as optional polish. Treat it as the default closure move for future-facing open loops.
+
 Create reminders aggressively when there is:
 
 1. a future checkpoint
@@ -140,6 +144,8 @@ Seedbox = internal carry-over material that should survive across turns without 
 
 Habit = contextual recurring rhythms that should shape today's judgment.
 
+Title pool = a tiny transient list of short action titles that should not be lost before the model decides whether to ignore them, follow up, or promote them.
+
 ## Module Use
 
 ### Obsidian
@@ -170,6 +176,14 @@ Use research for changing viewpoints and unfinished inquiry, not for durable mem
 Use memory for durable, behavior-changing information. Search memory before decisions that may depend on long-term context. Store memory only when the information should survive beyond today.
 
 Use seedbox for unresolved worries, things to learn later, future threads, links, products, quotes, and other future-useful internal material that should persist across turns. Treat it as a seedbox, not a sprint board. Keep titles short, capture why the item matters, and only add a next action when there is a genuinely useful future step.
+
+### Title Pool
+
+Use title pool for very short current-action utterances such as "去洗澡", "把书拿出来", or "回消息" when the main need is simply not to lose the title yet.
+
+Do not force these short titles into reminder or seedbox immediately unless the need is already clear.
+
+If the item later becomes a real future follow-up obligation, promote it to reminder. If it turns out to matter across days, move that idea into seedbox instead.
 
 ### Diary
 
