@@ -7,7 +7,7 @@ const HABIT_CADENCES = new Set(["daily"]);
 const EVENT_TYPES = new Set(["done", "incomplete", "abandoned", "skipped", "nudged", "deferred", "note"]);
 const DAILY_STATE_EVENT_TYPES = new Set(["done", "incomplete", "abandoned", "skipped"]);
 const DEFAULT_COOLDOWN_MINUTES = 180;
-const DEFAULT_HABIT_DAY_RESET_HOUR = 4;
+const DEFAULT_HABIT_DAY_RESET_HOUR = 5;
 const DEFAULT_HABIT_TIMEZONE = "Asia/Shanghai";
 
 class HabitStateService {
@@ -189,6 +189,12 @@ class HabitStateService {
     const habit = this.loadDefinitions().habits.find((candidate) => candidate.id === habitId);
     if (!habit) {
       throw new Error(`Habit not found: ${habitId}`);
+    }
+    const source = normalizeText(input.source);
+    if (type === "abandoned" && source !== "user" && !normalizeText(input.note)) {
+      throw new Error(
+        "Agent-initiated abandoned requires a note quoting the user's exact words that signal giving up for today.",
+      );
     }
     const event = {
       id: crypto.randomUUID(),

@@ -171,14 +171,8 @@ const PROJECT_TOOLS = [
         obsidian.error = error?.message || String(error);
       }
 
-      const memories = includeMemories
-        ? services.agentMemory.list({ limit: 5, includeArchived: false })
-        : { count: 0, memories: [] };
       const titlePool = includeTitlePool
         ? services.titlePool.list({ limit: 8 })
-        : { count: 0, items: [] };
-      const seedbox = includeSeedbox
-        ? services.seedbox.list({ limit: 5, includeDone: false })
         : { count: 0, items: [] };
 
       const habitExposure = decidePulseExposure({
@@ -187,20 +181,78 @@ const PROJECT_TOOLS = [
         moduleName: "habit",
         version: buildHabitExposureVersion(habitClosureSnapshot),
       });
-      const memoryExposure = decidePulseExposure({
-        runtimeContextStore,
-        workspaceKey: pulseWorkspaceKey,
-        moduleName: "memories",
-        version: buildFileExposureVersion(memories.filePath),
-        enabled: includeMemories,
-      });
-      const seedboxExposure = decidePulseExposure({
-        runtimeContextStore,
-        workspaceKey: pulseWorkspaceKey,
-        moduleName: "seedbox",
-        version: buildFileExposureVersion(seedbox.filePath),
-        enabled: includeSeedbox,
-      });
+
+      // When embedding search is configured, memories/seedbox use semantic
+      // search keyed off the current context with id-based dedup across recent
+      // pulses instead of the time-based cooldown. Same context repeated will
+      // keep surfacing the same top hits, so dedup suppresses repeats; a new
+      // topic changes the query and naturally surfaces fresh items.
+      let memories;
+      let memoryExposureMode;
+      let memoryExposureReason;
+      let seedbox;
+      let seedboxExposureMode;
+      let seedboxExposureReason;
+      if (services.embedding?.isConfigured()) {
+        const memoryPulse = await collectPulseSearchMemories({
+          services,
+          context: args.context,
+          runtimeContextStore,
+          workspaceKey: pulseWorkspaceKey,
+          enabled: includeMemories,
+        });
+        memories = {
+          ...memoryPulse.result,
+          exposureMode: memoryPulse.mode,
+          exposureReason: memoryPulse.reason,
+        };
+        memoryExposureMode = memoryPulse.mode;
+        memoryExposureReason = memoryPulse.reason;
+
+        const seedboxPulse = await collectPulseSearchSeedbox({
+          services,
+          context: args.context,
+          runtimeContextStore,
+          workspaceKey: pulseWorkspaceKey,
+          enabled: includeSeedbox,
+        });
+        seedbox = {
+          ...seedboxPulse.result,
+          exposureMode: seedboxPulse.mode,
+          exposureReason: seedboxPulse.reason,
+        };
+        seedboxExposureMode = seedboxPulse.mode;
+        seedboxExposureReason = seedboxPulse.reason;
+      } else {
+        memories = includeMemories
+          ? services.agentMemory.list({ limit: 5, includeArchived: false })
+          : { count: 0, memories: [] };
+        seedbox = includeSeedbox
+          ? services.seedbox.list({ limit: 5, includeDone: false })
+          : { count: 0, items: [] };
+
+        const memoryExposure = decidePulseExposure({
+          runtimeContextStore,
+          workspaceKey: pulseWorkspaceKey,
+          moduleName: "memories",
+          version: buildFileExposureVersion(memories.filePath),
+          enabled: includeMemories,
+        });
+        memories = applyMemoryPulseExposure(memories, memoryExposure);
+        memoryExposureMode = memoryExposure.mode;
+        memoryExposureReason = memoryExposure.reason;
+
+        const seedboxExposure = decidePulseExposure({
+          runtimeContextStore,
+          workspaceKey: pulseWorkspaceKey,
+          moduleName: "seedbox",
+          version: buildFileExposureVersion(seedbox.filePath),
+          enabled: includeSeedbox,
+        });
+        seedbox = applySeedboxPulseExposure(seedbox, seedboxExposure);
+        seedboxExposureMode = seedboxExposure.mode;
+        seedboxExposureReason = seedboxExposure.reason;
+      }
 
       const summary = buildPulseReviewSummary({
         turnIntent,
@@ -224,17 +276,17 @@ const PROJECT_TOOLS = [
           habitStatus: applyHabitPulseExposure(habitStatus, habitExposure),
           habitSuggestion: normalizeHabitSuggestionForPulse(habitSuggestion),
           obsidian,
-          memories: applyMemoryPulseExposure(memories, memoryExposure),
+          memories,
           titlePool,
-          seedbox: applySeedboxPulseExposure(seedbox, seedboxExposure),
+          seedbox,
           messageOpportunity: summary.messageOpportunity,
           followupOpportunity: summary.followupOpportunity,
           recommendedPrivateActions: summary.recommendedPrivateActions,
           exposureMode: {
             habit: habitExposure.mode,
-            memories: memoryExposure.mode,
+            memories: memoryExposureMode,
             titlePool: includeTitlePool ? "full" : "disabled",
-            seedbox: seedboxExposure.mode,
+            seedbox: seedboxExposureMode,
           },
         },
       };
@@ -443,7 +495,7 @@ const PROJECT_TOOLS = [
     async handler({ services, args }) {
       const item = services.titlePool.remove({ id: args.id });
       try {
-        const seedbox = services.seedbox.create({
+        const seedbox = await services.seedbox.create({
           title: item.title,
           kind: normalizeText(args.kind) || "wishseed",
         });
@@ -481,7 +533,7 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.agentMemory.remember(args);
+      const result = await services.agentMemory.remember(args);
       return {
         text: `Memory stored: ${result.subject}`,
         data: result,
@@ -504,8 +556,8 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.agentMemory.search(args);
-      return {
+     const result = await services.agentMemory.search(args);
+     return {
         text: `Memory search results: ${result.count}.`,
         data: result,
       };
@@ -557,7 +609,7 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.agentMemory.update(args);
+      const result = await services.agentMemory.update(args);
       return {
         text: `Memory updated: ${result.subject}`,
         data: result,
@@ -603,7 +655,7 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.seedbox.create(args);
+      const result = await services.seedbox.create(args);
       return {
         text: `Seedbox item stored: ${result.title}`,
         data: result,
@@ -632,10 +684,33 @@ const PROJECT_TOOLS = [
       };
     },
   },
- {
-   name: "cyberboss_seedbox_update",
-   description: "Update a structured seedbox item after it becomes clearer, more relevant, more concrete, or less useful.",
-   shortHint: "Update a seedbox item.",
+  {
+    name: "cyberboss_seedbox_search",
+    description: "Search seedbox items by semantic similarity (embedding) or keyword substring fallback. Use this instead of list when looking for a specific topic across a large seedbox.",
+    shortHint: "Search seedbox items.",
+    topics: ["seedbox", "memory"],
+    inputSchema: {
+      type: "object",
+      required: ["query"],
+      properties: {
+        query: { type: "string", description: "Search query." },
+        limit: { type: "integer", description: "Optional maximum result count." },
+        includeCompleted: { type: "boolean", description: "Whether to include completed items." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = await services.seedbox.search(args);
+      return {
+        text: `Seedbox search results: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_seedbox_update",
+  description: "Update a structured seedbox item after it becomes clearer, more relevant, more concrete, or less useful.",
+  shortHint: "Update a seedbox item.",
     topics: ["seedbox", "memory"],
    inputSchema: {
      type: "object",
@@ -650,7 +725,7 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.seedbox.update(args);
+      const result = await services.seedbox.update(args);
       return {
         text: `Seedbox item updated: ${result.title}`,
         data: result,
@@ -672,16 +747,60 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.seedbox.complete(args);
+      const result = await services.seedbox.complete(args);
       return {
         text: `Seedbox item completed: ${result.title}`,
         data: result,
       };
     },
-  },
-  ...createHabitToolSpecs(),
+ },
+ ...createHabitToolSpecs(),
   {
-    name: "cyberboss_diary_append",
+    name: "cyberboss_memory_reindex",
+    description: "Recompute embeddings for memories that do not yet have one. Run this once after configuring the embedding service to enable semantic search over existing memories.",
+    shortHint: "Reindex memory embeddings.",
+    topics: ["memory"],
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    async handler({ services }) {
+      const result = await services.agentMemory.reindex();
+      return {
+        text: result.skipped
+          ? `Memory reindex skipped: ${result.reason}`
+          : result.error
+            ? `Memory reindex failed: ${result.error}`
+            : `Memory reindex completed: ${result.reindexed} embedding(s) computed.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_seedbox_reindex",
+    description: "Recompute embeddings for seedbox items that do not yet have one. Run this once after configuring the embedding service to enable semantic search over existing seedbox items.",
+    shortHint: "Reindex seedbox embeddings.",
+    topics: ["seedbox"],
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+    async handler({ services }) {
+      const result = await services.seedbox.reindex();
+      return {
+        text: result.skipped
+          ? `Seedbox reindex skipped: ${result.reason}`
+          : result.error
+            ? `Seedbox reindex failed: ${result.error}`
+            : `Seedbox reindex completed: ${result.reindexed} embedding(s) computed.`,
+        data: result,
+      };
+    },
+  },
+ {
+   name: "cyberboss_diary_append",
     description: "Append a diary entry into Cyberboss local diary storage.",
     shortHint: "Append a diary entry with direct text content.",
     topics: ["diary"],
@@ -1482,6 +1601,115 @@ function detectObsidianSignal(obsidian) {
 }
 
 const PULSE_DETAIL_COOLDOWN_MS = 60 * 60 * 1000;
+
+// Embedding-search pulse path: take the top-N most relevant items per pulse,
+// but skip any id already surfaced within the last PULSE_SHOWN_ROUNDS_WINDOW
+// pulses. Same context repeats -> same candidates -> all deduped -> nothing new
+// returned; a new topic -> new query -> fresh ids. This replaces the
+// time-based cooldown for memories/seedbox when embedding is configured.
+const PULSE_SEARCH_TOP = 3;
+const PULSE_SEARCH_CANDIDATE_LIMIT = 6;
+const PULSE_SHOWN_ROUNDS_WINDOW = 10;
+
+function getShownIdSet(runtimeContextStore, workspaceKey, moduleName) {
+  const state = runtimeContextStore?.getPulseExposureModule?.(workspaceKey, moduleName);
+  const rounds = Array.isArray(state?.shownRounds) ? state.shownRounds : [];
+  return new Set(rounds.flat().filter(Boolean));
+}
+
+function recordPulseShownIds(runtimeContextStore, workspaceKey, moduleName, ids = []) {
+  const state = runtimeContextStore?.getPulseExposureModule?.(workspaceKey, moduleName) || {};
+  const rounds = Array.isArray(state.shownRounds) ? state.shownRounds : [];
+  const cleanIds = (Array.isArray(ids) ? ids : []).map(normalizeText).filter(Boolean);
+  const nextRounds = [...rounds, cleanIds].slice(-PULSE_SHOWN_ROUNDS_WINDOW);
+  runtimeContextStore?.setPulseExposureModule?.(workspaceKey, moduleName, {
+    shownRounds: nextRounds,
+    lastSearchedAt: new Date().toISOString(),
+  });
+  return nextRounds;
+}
+
+async function collectPulseSearchMemories({
+  services,
+  context,
+  runtimeContextStore,
+  workspaceKey,
+  enabled,
+}) {
+  if (!enabled) {
+    return { mode: "disabled", result: { count: 0, memories: [] }, reason: "module disabled for this pulse" };
+  }
+  const query = normalizeText(context);
+  const result = await services.agentMemory.search({
+    query,
+    limit: PULSE_SEARCH_CANDIDATE_LIMIT,
+    includeArchived: false,
+  });
+  const shownSet = getShownIdSet(runtimeContextStore, workspaceKey, "memories");
+  const candidates = Array.isArray(result?.memories) ? result.memories : [];
+  const picked = candidates
+    .filter((item) => !shownSet.has(normalizeText(item?.id)))
+    .slice(0, PULSE_SEARCH_TOP);
+  recordPulseShownIds(
+    runtimeContextStore,
+    workspaceKey,
+    "memories",
+    picked.map((item) => normalizeText(item?.id)),
+  );
+  return {
+    mode: "search",
+    result: {
+      filePath: result?.filePath || "",
+      query: result?.query || query,
+      count: picked.length,
+      memories: picked,
+    },
+    reason: picked.length
+      ? "embedding search top-3 after id dedup"
+      : "no new memories matched after dedup",
+  };
+}
+
+async function collectPulseSearchSeedbox({
+  services,
+  context,
+  runtimeContextStore,
+  workspaceKey,
+  enabled,
+}) {
+  if (!enabled) {
+    return { mode: "disabled", result: { count: 0, items: [] }, reason: "module disabled for this pulse" };
+  }
+  const query = normalizeText(context);
+  const result = await services.seedbox.search({
+    query,
+    limit: PULSE_SEARCH_CANDIDATE_LIMIT,
+    includeCompleted: false,
+  });
+  const shownSet = getShownIdSet(runtimeContextStore, workspaceKey, "seedbox");
+  const candidates = Array.isArray(result?.items) ? result.items : [];
+  const picked = candidates
+    .filter((item) => !shownSet.has(normalizeText(item?.id)))
+    .slice(0, PULSE_SEARCH_TOP);
+  recordPulseShownIds(
+    runtimeContextStore,
+    workspaceKey,
+    "seedbox",
+    picked.map((item) => normalizeText(item?.id)),
+  );
+  return {
+    mode: "search",
+    result: {
+      filePath: result?.filePath || "",
+      query: result?.query || query,
+      count: picked.length,
+      items: picked,
+    },
+    reason: picked.length
+      ? "embedding search top-3 after id dedup"
+      : "no new seedbox items matched after dedup",
+  };
+}
 
 function resolvePulseWorkspaceKey(context = {}) {
   return normalizeText(context?.workspaceRoot) || "__global__";

@@ -2,6 +2,7 @@ const { createWeixinChannelAdapter } = require("../adapters/channel/weixin");
 const { SessionStore } = require("../adapters/runtime/codex/session-store");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const { AgentMemoryService } = require("../services/agent-memory-service");
+const { EmbeddingService } = require("../services/embedding-service");
 const { ChannelFileService } = require("../services/channel-file-service");
 const { DiaryService } = require("../services/diary-service");
 const { HabitProvider } = require("../habit/habit-provider");
@@ -29,9 +30,11 @@ function createProjectTooling(config, options = {}) {
   });
   const channelFile = new ChannelFileService({ config, channelAdapter, sessionStore });
   const habit = new HabitService(buildHabitServiceOptions(config));
+  const embedding = new EmbeddingService({ config });
   const services = {
-    seedbox: new SeedboxService({ config }),
-    agentMemory: new AgentMemoryService({ config }),
+    seedbox: new SeedboxService({ config, embeddingService: embedding }),
+    agentMemory: new AgentMemoryService({ config, embeddingService: embedding }),
+    embedding,
     diary: new DiaryService({ config }),
     habit,
     habitProvider: new HabitProvider({ habitService: habit }),
@@ -77,6 +80,7 @@ function buildHabitServiceOptions(config) {
     eventsFile: config.habitEventsFile,
     stateFile: config.habitStateFile,
     heatmapFile: config.habitHeatmapFile,
+    dayResetHour: config.habitDayResetHour,
   };
 }
 

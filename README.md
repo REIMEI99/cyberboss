@@ -117,6 +117,7 @@ traceflow 只做 Todo List 做不到的那部分：
 - **diary**：零 token 日记，直接写本地文件，不依赖云笔记、不额外烧模型上下文。不等待触发词，一天里有值得留的东西就记，睡前做一次收尾。
 - **whereabouts**：内置位置/电量/触发语境的 HTTP 摄入服务（`whereabouts-mcp`），让模型知道你在哪、在家还是在公司、电量多少。
 - **memory**：持久的事实、偏好、原则、关系、项目语境、自我规则。决策前先搜记忆，只在信息需要活过今天时才存。
+- **embedding**：memory 与 seedbox 的语义检索后端。配置 `CYBERBOSS_EMBEDDING_*` 后，写入时自动算向量，`search` 走余弦相似度；未配置时退回子串匹配。老数据用 `cyberboss_memory_reindex` / `cyberboss_seedbox_reindex` 补算一次即可。
 - **sticker**：表情包标签化存取，情绪/休闲场景里用贴纸代替纯文字。
 - **vision**：对不支持原生图片输入的模型，用 OpenAI 兼容的视觉描述 API 做兜底；`auto` 模式下原生可用就用原生。
 
@@ -170,6 +171,9 @@ CYBERBOSS_CLAUDE_CONTEXT_WINDOW=200000
 CYBERBOSS_VISION_MODE=auto         # auto / caption / native / off
 CYBERBOSS_OBSIDIAN_VAULT_ROOT=     # 启用 Obsidian 语境
 CYBERBOSS_ENABLE_LOCATION_SERVER=false
+CYBERBOSS_EMBEDDING_API_BASE_URL=  # 启用语义检索（OpenAI 兼容 embeddings 端点）
+CYBERBOSS_EMBEDDING_API_KEY=
+CYBERBOSS_EMBEDDING_MODEL=text-embedding-3-small
 ```
 
 为什么要先设用户名和性别：第一条 `cyberboss` 命令会自动生成 `~/.cyberboss/weixin-instructions.md` 人设文件，先设好能避免一开始就跑偏。想拿到最强的 push 效果，别一上来就手改人设模板，先让 Agent 在真实对话里养出节奏，再只改明显不对的地方。
@@ -218,9 +222,11 @@ Pool（title pool）：
 
 Memory：
 `cyberboss_memory_remember` · `cyberboss_memory_search` · `cyberboss_memory_list` · `cyberboss_memory_update` · `cyberboss_memory_forget`
+` · `cyberboss_memory_reindex`
 
 Seedbox：
 `cyberboss_seedbox_create` · `cyberboss_seedbox_list` · `cyberboss_seedbox_update` · `cyberboss_seedbox_complete`
+` · `cyberboss_seedbox_search` · `cyberboss_seedbox_reindex`
 
 Reminder：
 `cyberboss_reminder_create` · `cyberboss_reminder_list` · `cyberboss_reminder_complete`

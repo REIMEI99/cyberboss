@@ -146,7 +146,7 @@ function createHabitToolSpecs() {
     },
     {
       name: "cyberboss_habit_mark_abandoned",
-      description: "Set today's mutually exclusive habit state to abandoned. Use when the clean reset is to give up for today, such as when doing it now would be harmful.",
+      description: "Set today's mutually exclusive habit state to abandoned. Only use when the user explicitly signals giving up for today. The note field is REQUIRED and must quote the user's exact words (e.g. note: \"我今天不想吃药了\"). Without an explicit user give-up signal, do not mark abandoned — leave it incomplete instead.",
       shortHint: "Mark habit abandoned.",
       topics: ["habit"],
       inputSchema: {
@@ -154,7 +154,7 @@ function createHabitToolSpecs() {
         required: ["habitId"],
         properties: {
           habitId: { type: "string" },
-          note: { type: "string" },
+          note: { type: "string", description: "REQUIRED. Quote the user's exact words that signal giving up for today." },
           source: { type: "string" },
           createdAt: { type: "string" },
         },
@@ -170,7 +170,7 @@ function createHabitToolSpecs() {
     },
     {
       name: "cyberboss_habit_mark_skipped",
-      description: "Compatibility alias for cyberboss_habit_mark_abandoned. Sets today's habit state to abandoned.",
+      description: "Compatibility alias for cyberboss_habit_mark_abandoned. Same note requirement applies: note must quote the user's exact give-up words.",
       shortHint: "Mark habit skipped.",
       topics: ["habit"],
       inputSchema: {
@@ -178,7 +178,7 @@ function createHabitToolSpecs() {
         required: ["habitId"],
         properties: {
           habitId: { type: "string" },
-          note: { type: "string" },
+          note: { type: "string", description: "REQUIRED. Quote the user's exact words that signal giving up for today." },
           source: { type: "string" },
           createdAt: { type: "string" },
         },

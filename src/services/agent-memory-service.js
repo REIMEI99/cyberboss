@@ -1,24 +1,26 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
+const { rankByEmbedding } = require("./embedding-service");
 
 const MEMORY_TYPES = new Set(["preference", "fact", "principle", "relationship", "project", "self"]);
 const MEMORY_STATUSES = new Set(["active", "archived"]);
 
 class AgentMemoryService {
-  constructor({ config }) {
+  constructor({ config, embeddingService = null }) {
     this.config = config;
+    this.embeddingService = embeddingService;
     this.filePath = config.agentMemoryFile;
     this.state = { memories: [] };
     this.ensureParentDirectory();
-    this.load();
+    this.loadSync();
   }
 
   ensureParentDirectory() {
     fs.mkdirSync(path.dirname(this.filePath), { recursive: true });
   }
 
-  load() {
+  loadSync() {
     try {
       const raw = fs.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
@@ -35,8 +37,8 @@ class AgentMemoryService {
     fs.writeFileSync(this.filePath, JSON.stringify(this.state, null, 2));
   }
 
-  remember(input = {}) {
-    this.load();
+  async remember(input = {}) {
+    this.loadSync();
     const now = new Date().toISOString();
     const memory = normalizeMemory({
       id: crypto.randomUUID(),
@@ -58,6 +60,7 @@ class AgentMemoryService {
     if (!memory) {
       throw new Error("Invalid memory. Provide at least type, subject, and content.");
     }
+    await applyEmbedding(this, memory);
     this.state.memories.push(memory);
     this.state.memories.sort(compareMemories);
     this.save();
@@ -65,7 +68,7 @@ class AgentMemoryService {
   }
 
   list({ type = "", subject = "", includeArchived = false, limit = 20 } = {}) {
-    this.load();
+    this.loadSync();
     const normalizedType = normalizeText(type).toLowerCase();
     const normalizedSubject = normalizeText(subject).toLowerCase();
     const memories = this.state.memories
@@ -81,15 +84,26 @@ class AgentMemoryService {
     };
   }
 
-  search({ query = "", limit = 20, includeArchived = false } = {}) {
-    this.load();
+  async search({ query = "", limit = 20, includeArchived = false } = {}) {
+    this.loadSync();
+    const candidates = this.state.memories
+      .filter((memory) => includeArchived || memory.status === "active")
+      .filter((memory) => !isExpired(memory));
+    if (this.embeddingService?.isConfigured()) {
+      const [queryEmbedding] = await this.embeddingService.embed([normalizeText(query)]);
+      if (Array.isArray(queryEmbedding) && queryEmbedding.length) {
+        const matched = rankByEmbedding(candidates, queryEmbedding, { limit });
+        if (matched.length) {
+          return { filePath: this.filePath, query: normalizeText(query), count: matched.length, memories: matched };
+        }
+      }
+    }
     const terms = normalizeText(query).toLowerCase().split(/\s+/).filter(Boolean);
     if (!terms.length) {
-      return this.list({ limit, includeArchived });
+      const fallback = this.list({ limit, includeArchived });
+      return { ...fallback, query: "" };
     }
-    const memories = this.state.memories
-      .filter((memory) => includeArchived || memory.status === "active")
-      .filter((memory) => !isExpired(memory))
+    const memories = candidates
       .map((memory) => ({ memory, score: scoreMemory(memory, terms) }))
       .filter((item) => item.score > 0)
       .sort((left, right) => right.score - left.score || compareMemories(left.memory, right.memory))
@@ -103,8 +117,61 @@ class AgentMemoryService {
     };
   }
 
-  update({ id = "", ...patch } = {}) {
-    this.load();
+  async update({ id = "", ...patch } = {}) {
+    this.loadSync();
+    const memoryId = normalizeText(id);
+    if (!memoryId) {
+      throw new Error("Memory update requires id.");
+    }
+    const index = this.state.memories.findIndex((memory) => memory.id === memoryId);
+    if (index < 0) {
+      throw new Error(`Memory not found: ${memoryId}`);
+    }
+    const current = this.state.memories[index];
+    const next = normalizeMemory({
+      ...current,
+      ...filterDefinedPatch(patch),
+      expiresAtMs: Object.prototype.hasOwnProperty.call(patch, "expiresAt")
+        ? normalizeTimeMs(patch.expiresAt)
+        : Object.prototype.hasOwnProperty.call(patch, "expiresAtMs")
+          ? normalizeTimeMs(patch.expiresAtMs)
+          : current.expiresAtMs,
+      updatedAt: new Date().toISOString(),
+    });
+    if (!next) {
+      throw new Error("Memory update produced an invalid memory.");
+    }
+    if (this.embeddingService?.isConfigured() && contentChanged(current, next)) {
+      await applyEmbedding(this, next);
+    } else {
+      next.embedding = Array.isArray(current.embedding) ? current.embedding : [];
+    }
+    this.state.memories[index] = next;
+    this.state.memories.sort(compareMemories);
+    this.save();
+    return next;
+  }
+
+  touch({ id = "" } = {}) {
+    const now = new Date().toISOString();
+    return this.updateSync({
+      id,
+      lastUsedAt: now,
+      lastUsedAtMs: Date.parse(now),
+    });
+  }
+
+  forget({ id = "", reason = "" } = {}) {
+    const notes = normalizeText(reason);
+    return this.updateSync({
+      id,
+      status: "archived",
+      sourceRef: notes ? `forgot: ${notes}` : undefined,
+    });
+  }
+
+  updateSync({ id = "", ...patch } = {}) {
+    this.loadSync();
     const memoryId = normalizeText(id);
     if (!memoryId) {
       throw new Error("Memory update requires id.");
@@ -133,23 +200,49 @@ class AgentMemoryService {
     return next;
   }
 
-  touch({ id = "" } = {}) {
-    const now = new Date().toISOString();
-    return this.update({
-      id,
-      lastUsedAt: now,
-      lastUsedAtMs: Date.parse(now),
-    });
+  async reindex() {
+    this.loadSync();
+    if (!this.embeddingService?.isConfigured()) {
+      return { reindexed: 0, skipped: true, reason: "embedding service is not configured" };
+    }
+    const targets = this.state.memories.filter((memory) => !Array.isArray(memory.embedding) || !memory.embedding.length);
+    if (!targets.length) {
+      return { reindexed: 0, skipped: false, reason: "no memories without embedding" };
+    }
+    const texts = targets.map(buildMemoryEmbeddingText);
+    const embeddings = await this.embeddingService.embed(texts);
+    if (!Array.isArray(embeddings) || !embeddings.length) {
+      return {
+        reindexed: 0,
+        skipped: false,
+        error: this.embeddingService.lastError || "embedding API returned no results",
+        reason: "",
+      };
+    }
+    let reindexed = 0;
+    for (let i = 0; i < targets.length && i < embeddings.length; i += 1) {
+      if (Array.isArray(embeddings[i]) && embeddings[i].length) {
+        const index = this.state.memories.findIndex((memory) => memory.id === targets[i].id);
+        if (index >= 0) {
+          this.state.memories[index].embedding = embeddings[i];
+          reindexed += 1;
+        }
+      }
+    }
+    if (reindexed > 0) {
+      this.save();
+    }
+    return { reindexed, skipped: false, reason: "" };
   }
+}
 
-  forget({ id = "", reason = "" } = {}) {
-    const notes = normalizeText(reason);
-    return this.update({
-      id,
-      status: "archived",
-      sourceRef: notes ? `forgot: ${notes}` : undefined,
-    });
+async function applyEmbedding(service, memory) {
+  if (!service.embeddingService?.isConfigured()) {
+    memory.embedding = [];
+    return;
   }
+  const [embedding] = await service.embeddingService.embed([buildMemoryEmbeddingText(memory)]);
+  memory.embedding = Array.isArray(embedding) && embedding.length ? embedding : [];
 }
 
 function normalizeMemory(value) {
@@ -170,6 +263,7 @@ function normalizeMemory(value) {
   const lastUsedAt = normalizeIsoTime(value.lastUsedAt);
   const lastUsedAtMs = normalizeTimeMs(value.lastUsedAtMs || value.lastUsedAt);
   const tags = normalizeStringList(value.tags);
+  const embedding = Array.isArray(value.embedding) ? value.embedding : [];
 
   if (!id || !subject || !content) {
     return null;
@@ -189,7 +283,21 @@ function normalizeMemory(value) {
     updatedAt,
     lastUsedAt,
     lastUsedAtMs,
+    embedding,
   };
+}
+
+function buildMemoryEmbeddingText(memory) {
+  return [memory?.type, memory?.subject, memory?.content, ...(memory?.tags || [])]
+    .map(normalizeText)
+    .filter(Boolean)
+    .join(" ");
+}
+
+function contentChanged(left, right) {
+  return normalizeText(left?.subject) !== normalizeText(right?.subject)
+    || normalizeText(left?.content) !== normalizeText(right?.content)
+    || JSON.stringify(normalizeStringList(left?.tags)) !== JSON.stringify(normalizeStringList(right?.tags));
 }
 
 function scoreMemory(memory, terms) {
