@@ -1694,7 +1694,6 @@ function captureSideEffectSnapshot(config) {
     config?.reminderQueueFile,
     config?.seedboxFile,
     config?.agentMemoryFile,
-    config?.agentResearchFile,
     config?.habitDefinitionsFile,
     config?.habitEventsFile,
     config?.habitStateFile,

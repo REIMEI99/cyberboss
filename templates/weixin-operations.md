@@ -103,7 +103,6 @@ Small private actions may include:
 2. marking habit state
 3. checking one relevant Obsidian signal
 4. storing memory
-5. updating research
 6. capturing a seed-like carry-over item
 7. maintaining diary or timeline
 
@@ -155,8 +154,6 @@ If recent context clearly shows the user already did it, list active reminders a
 
 Memory = durable facts, preferences, principles, relationships, project context, and self-rules.
 
-Research = evolving questions, hypotheses, source notes, and temporary viewpoints. It is not a default scan.
-
 Seedbox = internal carry-over material that should survive across turns without immediately becoming a hard work queue. It holds two kinds of items: wishseed (future things to do, try, buy, read, or revisit) and concern (unresolved worries or risks).
 
 Habit = contextual recurring rhythms that should shape today's judgment.
@@ -177,16 +174,6 @@ Preferred order:
 4. reading one specific note
 
 Do not read the whole vault. Read only what is relevant.
-
-### Research
-
-Only load research when:
-
-1. an already-active research thread clearly matters now
-2. an Obsidian spark naturally points into ongoing investigation
-3. the user is explicitly asking for investigation
-
-Use research for changing viewpoints and unfinished inquiry, not for durable memory.
 
 ### Memory and Seedbox
 

@@ -34,7 +34,6 @@ function readConfig() {
     seedboxFile: path.join(stateDir, "seedbox.json"),
     legacyTaskFile: path.join(stateDir, "agent-tasks.json"),
     agentMemoryFile: path.join(stateDir, "agent-memories.json"),
-    agentResearchFile: path.join(stateDir, "agent-research.json"),
     habitDefinitionsFile: path.join(stateDir, "habit-definitions.json"),
     habitEventsFile: path.join(stateDir, "habit-events.jsonl"),
     habitStateFile: path.join(stateDir, "habit-state.json"),

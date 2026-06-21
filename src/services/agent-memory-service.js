@@ -2,7 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const MEMORY_TYPES = new Set(["preference", "fact", "principle", "relationship", "project", "research", "self"]);
+const MEMORY_TYPES = new Set(["preference", "fact", "principle", "relationship", "project", "self"]);
 const MEMORY_STATUSES = new Set(["active", "archived"]);
 
 class AgentMemoryService {

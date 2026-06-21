@@ -81,10 +81,6 @@ function listProjectToolNames() {
 
 const DEFAULT_HIDDEN_TOOL_NAMES = new Set([
   "cyberboss_memory_list",
-  "cyberboss_research_upsert",
-  "cyberboss_research_search",
-  "cyberboss_research_list",
-  "cyberboss_research_archive",
   "cyberboss_seedbox_list",
   "cyberboss_habit_list",
   "cyberboss_habit_status_today",
@@ -118,7 +114,6 @@ const PROJECT_TOOLS = [
         includeTitlePool: { type: "boolean", description: "Whether to include current title-pool items. Defaults to true." },
         includeSeedbox: { type: "boolean", description: "Whether to include active seedbox items. Defaults to true." },
         includeMemories: { type: "boolean", description: "Whether to include a few recent durable memories. Defaults to true." },
-        allowResearch: { type: "boolean", description: "Reserved flag for future evolving-research integration. Defaults to false." },
       },
       additionalProperties: false,
     },
@@ -240,10 +235,6 @@ const PROJECT_TOOLS = [
             memories: memoryExposure.mode,
             titlePool: includeTitlePool ? "full" : "disabled",
             seedbox: seedboxExposure.mode,
-          },
-          researchPolicy: {
-            allowed: args.allowResearch === true,
-            exposedByDefault: false,
           },
         },
       };
@@ -471,18 +462,18 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_memory_remember",
-    description: "Store a long-term structured memory that should influence future judgment. Do not use this for diary-like logs, tiny one-off details, or evolving research notes; use cyberboss_research_upsert for research.",
+    description: "Store a long-term structured memory that should influence future judgment. Do not use this for diary-like logs or tiny one-off details.",
     shortHint: "Store a long-term memory.",
     topics: ["memory", "seedbox"],
     inputSchema: {
       type: "object",
       required: ["type", "subject", "content"],
       properties: {
-        type: { type: "string", description: "preference, fact, principle, relationship, project, or self. Legacy research is accepted, but new research belongs in cyberboss_research_upsert." },
+        type: { type: "string", description: "preference, fact, principle, relationship, project, or self." },
         subject: { type: "string", description: "Who or what this memory is about." },
         content: { type: "string", description: "The durable fact, preference, principle, or finding." },
         confidence: { type: "number", description: "0 to 1. Defaults to 0.5." },
-        source: { type: "string", description: "wechat, obsidian, diary, timeline, agent_life, research, or other source label." },
+        source: { type: "string", description: "wechat, obsidian, diary, timeline, agent_life, or other source label." },
         sourceRef: { type: "string", description: "Optional note path, task id, life event id, URL, or short provenance." },
         expiresAt: { type: "string", description: "Optional ISO datetime after which the memory should stop applying." },
         tags: { type: "array", items: { type: "string" } },
@@ -595,114 +586,11 @@ const PROJECT_TOOLS = [
       };
     },
   },
-  {
-    name: "cyberboss_research_upsert",
-    description: "Create or update an evolving research topic in a dedicated research file. Use this for temporary hypotheses, changing opinions, source notes, open questions, and synthesis instead of long-term memory.",
-    shortHint: "Create or update research notes.",
-    topics: ["research", "seedbox", "memory"],
-    inputSchema: {
-      type: "object",
-      required: ["topic"],
-      properties: {
-        id: { type: "string", description: "Existing research id. If omitted, an active item with the same topic is updated or a new one is created." },
-        topic: { type: "string", description: "Research topic or question." },
-        title: { type: "string", description: "Optional short display title." },
-        status: { type: "string", description: "active, exploring, parked, synthesized, or archived." },
-        hypothesis: { type: "string", description: "Current working hypothesis or viewpoint." },
-        synthesis: { type: "string", description: "Current synthesized judgment. Revise it as the conversation develops." },
-        notes: { type: "array", items: { type: "string" }, description: "Append temporary notes or observations." },
-        evidence: { type: "array", items: { type: "string" }, description: "Append source snippets, URLs, facts, or provenance notes." },
-        openQuestions: { type: "array", items: { type: "string" }, description: "Append questions the agent should investigate later." },
-        nextAction: { type: "string", description: "Smallest useful next research action for a future pulse." },
-        confidence: { type: "number", description: "0 to 1. Defaults to 0.5." },
-        source: { type: "string", description: "wechat, web_search, obsidian, agent, or other source label." },
-        sourceRef: { type: "string", description: "Optional URL, note path, message time, or short provenance." },
-        taskId: { type: "string", description: "Optional related cyberboss seedbox item id." },
-        tags: { type: "array", items: { type: "string" } },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = services.agentResearch.upsert(args);
-      return {
-        text: `Research updated: ${result.topic}`,
-        data: result,
-      };
-    },
-  },
-  {
-    name: "cyberboss_research_search",
-    description: "Search dedicated evolving research notes before starting or continuing investigation.",
-    shortHint: "Search research notes.",
-    topics: ["research", "seedbox"],
-    inputSchema: {
-      type: "object",
-      required: ["query"],
-      properties: {
-        query: { type: "string" },
-        limit: { type: "integer" },
-        includeArchived: { type: "boolean" },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = services.agentResearch.search(args);
-      return {
-        text: `Research search results: ${result.count}.`,
-        data: result,
-      };
-    },
-  },
-  {
-    name: "cyberboss_research_list",
-    description: "List active research topics. Use during pulse/check-in to decide which investigation to advance before choosing silent.",
-    shortHint: "List research topics.",
-    topics: ["research", "seedbox"],
-    inputSchema: {
-      type: "object",
-      properties: {
-        status: { type: "string", description: "Optional status filter." },
-        topic: { type: "string", description: "Optional topic filter." },
-        limit: { type: "integer" },
-        includeArchived: { type: "boolean" },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = services.agentResearch.list(args);
-      return {
-        text: `Research topics loaded: ${result.count}.`,
-        data: result,
-      };
-    },
-  },
-  {
-    name: "cyberboss_research_archive",
-    description: "Archive a research topic that is no longer useful or has been converted into durable memory or seedbox output.",
-    shortHint: "Archive research.",
-    topics: ["research"],
-    inputSchema: {
-      type: "object",
-      required: ["id"],
-      properties: {
-        id: { type: "string" },
-        reason: { type: "string" },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = services.agentResearch.archive(args);
-      return {
-        text: `Research archived: ${result.topic}`,
-        data: result,
-      };
-    },
-  },
  {
    name: "cyberboss_seedbox_create",
     description: "Create a structured seedbox item for future-oriented material the agent should not lose across turns. Use wishseed for things to do, try, buy, read, or revisit later; use concern for unresolved worries or risks.",
    shortHint: "Create a seedbox item.",
-    topics: ["seedbox", "memory", "research"],
+    topics: ["seedbox", "memory"],
    inputSchema: {
      type: "object",
      required: ["title"],
@@ -726,7 +614,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_seedbox_list",
     description: "List structured seedbox items. Use this when checking what unresolved or future-useful material the agent should keep alive across turns.",
     shortHint: "List seedbox items.",
-    topics: ["seedbox", "memory", "research"],
+    topics: ["seedbox", "memory"],
     inputSchema: {
       type: "object",
       properties: {
@@ -748,7 +636,7 @@ const PROJECT_TOOLS = [
    name: "cyberboss_seedbox_update",
    description: "Update a structured seedbox item after it becomes clearer, more relevant, more concrete, or less useful.",
    shortHint: "Update a seedbox item.",
-   topics: ["seedbox", "memory", "research"],
+    topics: ["seedbox", "memory"],
    inputSchema: {
      type: "object",
      required: ["id"],
@@ -773,7 +661,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_seedbox_complete",
     description: "Mark a structured seedbox item as resolved, exhausted, or no longer worth keeping active.",
     shortHint: "Complete a seedbox item.",
-    topics: ["seedbox", "memory", "research"],
+    topics: ["seedbox", "memory"],
     inputSchema: {
       type: "object",
       required: ["id"],
@@ -971,7 +859,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_obsidian_random_daily_excerpt",
     description: "Pick a random short excerpt from recent Obsidian daily notes. Use this during quiet pulses for serendipitous context before deciding whether to search further or capture a seedbox item.",
     shortHint: "Pick a random daily-note excerpt.",
-    topics: ["obsidian", "research", "seedbox"],
+    topics: ["obsidian", "seedbox"],
     inputSchema: {
       type: "object",
       properties: {

@@ -51,8 +51,6 @@ The main local behavior/state modules are:
   Future-useful internal carry-over material that should survive across turns without becoming a hard task board
 - `memory`
   Durable structured facts and preferences
-- `research`
-  Evolving, revisable investigation state
 
 These modules are coordinated by app/runtime flow rather than treated as separate products.
 

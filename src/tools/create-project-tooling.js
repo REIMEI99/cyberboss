@@ -2,7 +2,6 @@ const { createWeixinChannelAdapter } = require("../adapters/channel/weixin");
 const { SessionStore } = require("../adapters/runtime/codex/session-store");
 const { createTimelineIntegration } = require("../integrations/timeline");
 const { AgentMemoryService } = require("../services/agent-memory-service");
-const { AgentResearchService } = require("../services/agent-research-service");
 const { ChannelFileService } = require("../services/channel-file-service");
 const { DiaryService } = require("../services/diary-service");
 const { HabitProvider } = require("../habit/habit-provider");
@@ -33,7 +32,6 @@ function createProjectTooling(config, options = {}) {
   const services = {
     seedbox: new SeedboxService({ config }),
     agentMemory: new AgentMemoryService({ config }),
-    agentResearch: new AgentResearchService({ config }),
     diary: new DiaryService({ config }),
     habit,
     habitProvider: new HabitProvider({ habitService: habit }),

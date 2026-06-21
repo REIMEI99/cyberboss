@@ -31,20 +31,6 @@ function createHost() {
           return { id: args.id, text: "order food" };
         },
       },
-      agentResearch: {
-        upsert(args) {
-          return { id: args.id || "research-1", topic: args.topic, notes: args.notes || [] };
-        },
-        search(args) {
-          return { count: 1, query: args.query, research: [{ id: "research-1", topic: "retail research" }] };
-        },
-        list(args) {
-          return { count: 1, research: [{ id: "research-1", topic: args.topic || "retail research" }] };
-        },
-        archive(args) {
-          return { id: args.id, topic: "retail research", status: "archived" };
-        },
-      },
       system: {
         queueMessage(args) {
           return { id: "system-1", ...args };
@@ -370,26 +356,6 @@ test("tool host exposes structured timeline read tools", async () => {
   assert.equal(readResult.text, "Timeline day 2026-04-21: 1 events.");
   assert.equal(categoriesResult.text, "Timeline categories loaded: 2.");
   assert.equal(proposalsResult.text, "Timeline proposals loaded: 1.");
-});
-
-test("tool host exposes dedicated research tools", async () => {
-  const host = createHost();
-  const upsertResult = await host.invokeTool("cyberboss_research_upsert", {
-    topic: "retail research",
-    notes: ["Temporary viewpoint that may change."],
-  }, {});
-  const searchResult = await host.invokeTool("cyberboss_research_search", {
-    query: "retail",
-  }, {});
-  const listResult = await host.invokeTool("cyberboss_research_list", {}, {});
-  const archiveResult = await host.invokeTool("cyberboss_research_archive", {
-    id: "research-1",
-  }, {});
-
-  assert.equal(upsertResult.text, "Research updated: retail research");
-  assert.equal(searchResult.text, "Research search results: 1.");
-  assert.equal(listResult.text, "Research topics loaded: 1.");
-  assert.equal(archiveResult.text, "Research archived: retail research");
 });
 
 test("tool host exposes simplified seedbox tools without legacy fields in schema", async () => {
