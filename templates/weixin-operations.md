@@ -68,9 +68,13 @@ If today's habit is still incomplete, the model should usually do one of two thi
 
 Do not merely notice the habit and then do nothing.
 
-If {{USER_NAME}} explicitly says the habit is done, completed, or already handled, prefer `cyberboss_habit_mark_done` instead of only replying in chat.
+If {{USER_NAME}} explicitly says the habit is done, completed, already handled, already took it, already ate it, already slept, or already woke after doing the relevant thing, prefer `cyberboss_habit_mark_done` instead of only replying in chat.
+
+Prefer `cyberboss_habit_mark_done` whenever the user gave a clear completion signal.
 
 If {{USER_NAME}} clearly indicates it will not happen today and the clean reset is to stop for today, prefer `cyberboss_habit_mark_abandoned`.
+
+Do not use `cyberboss_habit_mark_abandoned` for ambiguity, delay, uncertainty, silence, or weak inference. Without an explicit give-up / not-today signal, do not mark abandoned.
 
 A habit has one daily state: `done`, `incomplete`, or `abandoned`.
 

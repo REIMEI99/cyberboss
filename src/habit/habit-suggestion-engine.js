@@ -15,14 +15,14 @@ class HabitSuggestionEngine {
       .sort((left, right) => right.score - left.score || left.habit.title.localeCompare(right.habit.title))
       .slice(0, normalizeLimit(limit));
     const best = candidates[0] || null;
-    return {
-      shouldContactUser: Boolean(best && best.canNudge),
-      reason: best
-        ? buildSuggestionReason(best)
-        : "No active incomplete habit currently looks appropriate.",
-      suggestions: candidates.map(buildHabitSuggestion),
-    };
-  }
+  return {
+    shouldContactUser: Boolean(best && best.canNudge),
+    reason: best
+      ? buildSuggestionReason(best)
+      : "",
+    suggestions: candidates.map(buildHabitSuggestion),
+  };
+}
 }
 
 function scoreHabitOpportunity(status, context, nowMs) {

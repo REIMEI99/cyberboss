@@ -152,9 +152,11 @@ async function maybeQueueHabitAudit(app, audit) {
     "The user said something that may imply a habit was completed, skipped, or cleanly abandoned for today.",
     `Original user text: ${audit.originalText}`,
     "No habit state change was detected during that turn.",
-    "Re-check whether a habit should now be marked done or abandoned.",
-    "Prefer cyberboss_habit_mark_done or cyberboss_habit_mark_abandoned when the user's statement was explicit enough.",
-    "If no habit state should be written, return silent.",
+    "Re-check whether a habit should now be marked done, or whether it should remain incomplete.",
+    "If the user explicitly said they already did it, handled it, took it, ate it, slept, woke up after it, or otherwise clearly completed it, prefer cyberboss_habit_mark_done.",
+    "Do not use cyberboss_habit_mark_abandoned unless the user clearly indicated giving up, stopping for today, or not doing it today.",
+    "If completion is plausible and abandonment is not explicit, prefer done over abandoned.",
+    "If there is still no explicit closure signal, leave the habit state unchanged and return silent.",
   ].join("\n");
 
   app.systemMessageQueue.enqueue({

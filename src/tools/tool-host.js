@@ -1,3 +1,4 @@
+const fs = require("fs");
 const { WhereaboutsToolHost } = require("whereabouts-mcp");
 const {
   STICKER_DESC_GUIDANCE,
@@ -42,6 +43,7 @@ class ProjectToolHost {
         services: this.services,
         args: normalizedArgs,
         context: resolvedContext,
+        runtimeContextStore: this.runtimeContextStore,
       });
     }
     for (const host of this.extraToolHosts) {
@@ -119,12 +121,14 @@ const PROJECT_TOOLS = [
       },
       additionalProperties: false,
     },
-    async handler({ services, args }) {
+    async handler({ services, args, context, runtimeContextStore }) {
       const turnIntent = normalizeTurnIntent(args.turnIntent);
       const includeObsidianExcerpt = args.includeObsidianExcerpt !== false;
       const includeSeedbox = args.includeSeedbox !== false;
       const includeMemories = args.includeMemories !== false;
       const obsidianQuery = normalizeText(args.obsidianQuery);
+      const pulseWorkspaceKey = resolvePulseWorkspaceKey(context);
+      const habitClosureSnapshot = services.habit.getTodayClosureSnapshot();
 
       const habitSnapshot = services.habitProvider.getPulseSnapshot({
         context: args.context,
@@ -145,7 +149,25 @@ const PROJECT_TOOLS = [
           if (obsidianQuery) {
             obsidian.result = services.obsidian.search({ query: obsidianQuery, limit: 5 });
           } else if (includeObsidianExcerpt) {
-            obsidian.result = services.obsidian.randomDailyExcerpt({});
+            const dailyExcerptExposure = decidePulseExposure({
+              runtimeContextStore,
+              workspaceKey: pulseWorkspaceKey,
+              moduleName: "obsidian_daily_excerpt",
+              version: buildDailyExcerptExposureVersion(),
+            });
+            if (dailyExcerptExposure.mode === "full") {
+              obsidian.result = services.obsidian.randomDailyExcerpt({});
+              obsidian.exposureMode = "full";
+              obsidian.exposureReason = dailyExcerptExposure.reason;
+            } else {
+              obsidian.result = {
+                found: false,
+                suppressed: true,
+                reason: "Daily excerpt suppressed within cooldown. Call cyberboss_obsidian_random_daily_excerpt if a fresh random signal is needed.",
+              };
+              obsidian.exposureMode = "summary";
+              obsidian.exposureReason = dailyExcerptExposure.reason;
+            }
           }
         }
       } catch (error) {
@@ -158,6 +180,27 @@ const PROJECT_TOOLS = [
       const seedbox = includeSeedbox
         ? services.seedbox.list({ limit: 5, includeDone: false })
         : { count: 0, items: [] };
+
+      const habitExposure = decidePulseExposure({
+        runtimeContextStore,
+        workspaceKey: pulseWorkspaceKey,
+        moduleName: "habit",
+        version: buildHabitExposureVersion(habitClosureSnapshot),
+      });
+      const memoryExposure = decidePulseExposure({
+        runtimeContextStore,
+        workspaceKey: pulseWorkspaceKey,
+        moduleName: "memories",
+        version: buildFileExposureVersion(memories.filePath),
+        enabled: includeMemories,
+      });
+      const seedboxExposure = decidePulseExposure({
+        runtimeContextStore,
+        workspaceKey: pulseWorkspaceKey,
+        moduleName: "seedbox",
+        version: buildFileExposureVersion(seedbox.filePath),
+        enabled: includeSeedbox,
+      });
 
       const summary = buildPulseReviewSummary({
         turnIntent,
@@ -177,14 +220,19 @@ const PROJECT_TOOLS = [
         data: {
           turnIntent,
           currentContextSummary: summary.currentContextSummary,
-          habitStatus,
+          habitStatus: applyHabitPulseExposure(habitStatus, habitExposure),
           habitSuggestion,
           obsidian,
-          memories,
-          seedbox,
+          memories: applyMemoryPulseExposure(memories, memoryExposure),
+          seedbox: applySeedboxPulseExposure(seedbox, seedboxExposure),
           messageOpportunity: summary.messageOpportunity,
           followupOpportunity: summary.followupOpportunity,
           recommendedPrivateActions: summary.recommendedPrivateActions,
+          exposureMode: {
+            habit: habitExposure.mode,
+            memories: memoryExposure.mode,
+            seedbox: seedboxExposure.mode,
+          },
           researchPolicy: {
             allowed: args.allowResearch === true,
             exposedByDefault: false,
@@ -1319,6 +1367,183 @@ function detectObsidianSignal(obsidian) {
     return true;
   }
   return false;
+}
+
+const PULSE_DETAIL_COOLDOWN_MS = 60 * 60 * 1000;
+
+function resolvePulseWorkspaceKey(context = {}) {
+  return normalizeText(context?.workspaceRoot) || "__global__";
+}
+
+function decidePulseExposure({
+  runtimeContextStore,
+  workspaceKey,
+  moduleName,
+  version,
+  enabled = true,
+} = {}) {
+  if (!enabled) {
+    return { mode: "disabled", reason: "module disabled for this pulse", version: "" };
+  }
+  const normalizedModuleName = normalizeText(moduleName);
+  const normalizedWorkspaceKey = normalizeText(workspaceKey) || "__global__";
+  const normalizedVersion = normalizeText(version);
+  const currentMs = Date.now();
+  const exposureState = runtimeContextStore?.getPulseExposureModule?.(normalizedWorkspaceKey, normalizedModuleName) || null;
+  if (!exposureState || !normalizeText(exposureState.lastVersion)) {
+    runtimeContextStore?.setPulseExposureModule?.(normalizedWorkspaceKey, normalizedModuleName, {
+      lastVersion: normalizedVersion,
+      lastFullAt: new Date(currentMs).toISOString(),
+      lastMode: "full",
+    });
+    return { mode: "full", reason: "first exposure", version: normalizedVersion };
+  }
+  const lastVersion = normalizeText(exposureState.lastVersion);
+  const lastFullMs = Date.parse(exposureState.lastFullAt || "") || 0;
+  const versionChanged = normalizedVersion && lastVersion !== normalizedVersion;
+  const cooldownExpired = !lastFullMs || currentMs - lastFullMs >= PULSE_DETAIL_COOLDOWN_MS;
+  const shouldExposeFull = versionChanged || cooldownExpired;
+  runtimeContextStore?.setPulseExposureModule?.(normalizedWorkspaceKey, normalizedModuleName, {
+    lastVersion: normalizedVersion || lastVersion,
+    lastFullAt: shouldExposeFull ? new Date(currentMs).toISOString() : exposureState.lastFullAt || "",
+    lastMode: shouldExposeFull ? "full" : "summary",
+  });
+  return {
+    mode: shouldExposeFull ? "full" : "summary",
+    reason: versionChanged ? "state changed" : (cooldownExpired ? "cooldown expired" : "within cooldown and unchanged"),
+    version: normalizedVersion || lastVersion,
+  };
+}
+
+function buildHabitExposureVersion(snapshot = {}) {
+  const date = normalizeText(snapshot?.date);
+  const signature = normalizeText(snapshot?.signature);
+  const stateEventCount = Number(snapshot?.stateEventCount) || 0;
+  return [date, stateEventCount, signature].filter(Boolean).join("|");
+}
+
+function buildDailyExcerptExposureVersion() {
+  const now = new Date();
+  const dayKey = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Shanghai",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(now);
+  return `daily_excerpt|${dayKey}`;
+}
+
+function buildFileExposureVersion(filePath = "") {
+  const normalizedPath = normalizeText(filePath);
+  if (!normalizedPath) {
+    return "";
+  }
+  try {
+    const stats = fs.statSync(normalizedPath);
+    return `${normalizedPath}|${Number(stats.mtimeMs || 0)}`;
+  } catch {
+    return normalizedPath;
+  }
+}
+
+function applyHabitPulseExposure(habitStatus, exposure) {
+  if (exposure?.mode !== "summary") {
+    return {
+      ...habitStatus,
+      exposureMode: exposure?.mode || "full",
+      exposureReason: exposure?.reason || "",
+    };
+  }
+  const habits = Array.isArray(habitStatus?.habits) ? habitStatus.habits : [];
+  const summary = summarizeHabitStatus(habits);
+  return {
+    filePath: habitStatus?.filePath || "",
+    date: habitStatus?.date || "",
+    count: Number(habitStatus?.count) || habits.length,
+    habits: [],
+    summary,
+    exposureMode: "summary",
+    exposureReason: exposure?.reason || "",
+    detailsSuppressed: true,
+  };
+}
+
+function applyMemoryPulseExposure(memories, exposure) {
+  if (exposure?.mode !== "summary") {
+    return {
+      ...memories,
+      exposureMode: exposure?.mode || "full",
+      exposureReason: exposure?.reason || "",
+    };
+  }
+  const items = Array.isArray(memories?.memories) ? memories.memories : [];
+  return {
+    filePath: memories?.filePath || "",
+    count: Number(memories?.count) || items.length,
+    memories: [],
+    summary: {
+      subjects: items.slice(0, 3).map((item) => normalizeText(item?.subject)).filter(Boolean),
+      types: uniqueNonEmpty(items.slice(0, 5).map((item) => normalizeText(item?.type))),
+    },
+    exposureMode: "summary",
+    exposureReason: exposure?.reason || "",
+    detailsSuppressed: true,
+  };
+}
+
+function applySeedboxPulseExposure(seedbox, exposure) {
+  if (exposure?.mode !== "summary") {
+    return {
+      ...seedbox,
+      exposureMode: exposure?.mode || "full",
+      exposureReason: exposure?.reason || "",
+    };
+  }
+  const items = Array.isArray(seedbox?.items) ? seedbox.items : [];
+  return {
+    filePath: seedbox?.filePath || "",
+    count: Number(seedbox?.count) || items.length,
+    items: [],
+    summary: {
+      titles: items.slice(0, 3).map((item) => normalizeText(item?.title)).filter(Boolean),
+      statuses: uniqueNonEmpty(items.slice(0, 5).map((item) => normalizeText(item?.status))),
+    },
+    exposureMode: "summary",
+    exposureReason: exposure?.reason || "",
+    detailsSuppressed: true,
+  };
+}
+
+function summarizeHabitStatus(habits) {
+  const items = Array.isArray(habits) ? habits : [];
+  const summary = {
+    doneCount: 0,
+    incompleteCount: 0,
+    abandonedCount: 0,
+    noneCount: 0,
+    topIncompleteHabits: [],
+  };
+  for (const item of items) {
+    const state = normalizeText(item?.dailyState) || "none";
+    if (state === "done") summary.doneCount += 1;
+    else if (state === "incomplete") summary.incompleteCount += 1;
+    else if (state === "abandoned") summary.abandonedCount += 1;
+    else summary.noneCount += 1;
+  }
+  summary.topIncompleteHabits = items
+    .filter((item) => normalizeText(item?.dailyState) === "incomplete")
+    .slice(0, 3)
+    .map((item) => ({
+      habitId: normalizeText(item?.habit?.id),
+      title: normalizeText(item?.habit?.title),
+      canNudge: item?.canNudge === true,
+    }))
+    .filter((item) => item.habitId || item.title);
+  return summary;
+}
+
+function uniqueNonEmpty(values) {
+  return [...new Set((Array.isArray(values) ? values : []).filter(Boolean))];
 }
 
 function buildToolDescription(tool) {

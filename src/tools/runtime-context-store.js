@@ -4,7 +4,7 @@ const path = require("path");
 class RuntimeContextStore {
   constructor({ filePath }) {
     this.filePath = filePath;
-    this.state = { contextsByWorkspaceRoot: {} };
+    this.state = createEmptyState();
     fs.mkdirSync(path.dirname(filePath), { recursive: true });
     this.load();
   }
@@ -15,11 +15,12 @@ class RuntimeContextStore {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === "object" && parsed.contextsByWorkspaceRoot) {
         this.state = {
-          contextsByWorkspaceRoot: parsed.contextsByWorkspaceRoot,
+          contextsByWorkspaceRoot: parsed.contextsByWorkspaceRoot || {},
+          pulseExposureByWorkspaceRoot: parsed.pulseExposureByWorkspaceRoot || {},
         };
       }
     } catch {
-      this.state = { contextsByWorkspaceRoot: {} };
+      this.state = createEmptyState();
     }
   }
 
@@ -78,6 +79,71 @@ class RuntimeContextStore {
     });
     return sorted[0] || null;
   }
+
+  getPulseExposureState(workspaceRoot = "") {
+    const key = normalizeWorkspaceKey(workspaceRoot);
+    const raw = this.state.pulseExposureByWorkspaceRoot?.[key];
+    if (!raw || typeof raw !== "object") {
+      return {
+        workspaceRoot: key,
+        modules: {},
+      };
+    }
+    return {
+      workspaceRoot: key,
+      modules: raw.modules && typeof raw.modules === "object" ? { ...raw.modules } : {},
+    };
+  }
+
+  getPulseExposureModule(workspaceRoot = "", moduleName = "") {
+    const state = this.getPulseExposureState(workspaceRoot);
+    const normalizedModuleName = normalizeText(moduleName);
+    if (!normalizedModuleName) {
+      return null;
+    }
+    const moduleState = state.modules?.[normalizedModuleName];
+    return moduleState && typeof moduleState === "object"
+      ? { ...moduleState }
+      : null;
+  }
+
+  setPulseExposureModule(workspaceRoot = "", moduleName = "", patch = {}) {
+    const key = normalizeWorkspaceKey(workspaceRoot);
+    const normalizedModuleName = normalizeText(moduleName);
+    if (!normalizedModuleName) {
+      return null;
+    }
+    const current = this.getPulseExposureState(key);
+    const nextModuleState = {
+      ...(current.modules?.[normalizedModuleName] || {}),
+      ...(patch && typeof patch === "object" ? patch : {}),
+      updatedAt: new Date().toISOString(),
+    };
+    this.state.pulseExposureByWorkspaceRoot = {
+      ...(this.state.pulseExposureByWorkspaceRoot || {}),
+      [key]: {
+        workspaceRoot: key,
+        modules: {
+          ...(current.modules || {}),
+          [normalizedModuleName]: nextModuleState,
+        },
+      },
+    };
+    this.save();
+    return { ...nextModuleState };
+  }
+}
+
+function createEmptyState() {
+  return {
+    contextsByWorkspaceRoot: {},
+    pulseExposureByWorkspaceRoot: {},
+  };
+}
+
+function normalizeWorkspaceKey(value) {
+  const normalized = normalizeText(value);
+  return normalized || "__global__";
 }
 
 function normalizeText(value) {
