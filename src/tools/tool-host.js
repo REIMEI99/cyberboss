@@ -806,6 +806,9 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
+      if (!services.obsidian.getStatus().configured) {
+        return { text: "Obsidian is not configured.", data: { configured: false } };
+      }
       const result = services.obsidian.search(args);
       return {
         text: `Obsidian search results: ${result.resultCount}.`,
@@ -826,6 +829,9 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
+      if (!services.obsidian.getStatus().configured) {
+        return { text: "Obsidian is not configured.", data: { configured: false } };
+      }
       const result = services.obsidian.recent(args);
       return {
         text: `Recent Obsidian notes loaded: ${result.resultCount}.`,
@@ -848,6 +854,9 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
+      if (!services.obsidian.getStatus().configured) {
+        return { text: "Obsidian is not configured.", data: { configured: false } };
+      }
       const result = services.obsidian.read(args);
       return {
         text: `Obsidian note read: ${result.relativePath}${result.truncated ? " (truncated)" : ""}.`,
@@ -870,6 +879,9 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
+      if (!services.obsidian.getStatus().configured) {
+        return { text: "Obsidian is not configured.", data: { configured: false } };
+      }
       const result = services.obsidian.randomDailyExcerpt(args);
       return {
         text: result.found
