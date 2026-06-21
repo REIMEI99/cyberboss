@@ -47,23 +47,9 @@ class ReminderQueueStore {
 
   listDue(nowMs = Date.now()) {
     this.load();
-    const due = [];
-    const pending = [];
-
-    for (const reminder of this.state.reminders) {
-      if (reminder.dueAtMs <= nowMs) {
-        due.push(reminder);
-      } else {
-        pending.push(reminder);
-      }
-    }
-
-    if (due.length) {
-      this.state.reminders = pending;
-      this.save();
-    }
-
-    return due;
+    return this.state.reminders
+      .filter((reminder) => reminder.dueAtMs <= nowMs)
+      .map((reminder) => ({ ...reminder }));
   }
 
   peekNextDueAtMs() {
@@ -75,6 +61,43 @@ class ReminderQueueStore {
   listAll() {
     this.load();
     return this.state.reminders.map((reminder) => ({ ...reminder }));
+  }
+
+  defer({ id = "", dueAtMs = 0 } = {}) {
+    this.load();
+    const normalizedId = typeof id === "string" ? id.trim() : "";
+    const normalizedDueAtMs = Number(dueAtMs);
+    if (!normalizedId || !Number.isFinite(normalizedDueAtMs) || normalizedDueAtMs <= 0) {
+      throw new Error("invalid reminder defer");
+    }
+    const index = this.state.reminders.findIndex((reminder) => reminder.id === normalizedId);
+    if (index < 0) {
+      throw new Error(`reminder not found: ${normalizedId}`);
+    }
+    this.state.reminders[index] = normalizeReminder({
+      ...this.state.reminders[index],
+      dueAtMs: normalizedDueAtMs,
+      lastTriggeredAt: new Date().toISOString(),
+      triggerCount: Number(this.state.reminders[index].triggerCount || 0) + 1,
+    });
+    this.state.reminders.sort((left, right) => left.dueAtMs - right.dueAtMs);
+    this.save();
+    return { ...this.state.reminders[index] };
+  }
+
+  complete({ id = "" } = {}) {
+    this.load();
+    const normalizedId = typeof id === "string" ? id.trim() : "";
+    if (!normalizedId) {
+      throw new Error("reminder complete requires id");
+    }
+    const index = this.state.reminders.findIndex((reminder) => reminder.id === normalizedId);
+    if (index < 0) {
+      throw new Error(`reminder not found: ${normalizedId}`);
+    }
+    const [removed] = this.state.reminders.splice(index, 1);
+    this.save();
+    return removed;
   }
 }
 
@@ -89,6 +112,9 @@ function normalizeReminder(reminder) {
   const text = typeof reminder.text === "string" ? reminder.text.trim() : "";
   const dueAtMs = Number(reminder.dueAtMs);
   const createdAt = typeof reminder.createdAt === "string" ? reminder.createdAt.trim() : "";
+  const followupDelayMinutes = Number.parseInt(String(reminder.followupDelayMinutes || ""), 10);
+  const lastTriggeredAt = typeof reminder.lastTriggeredAt === "string" ? reminder.lastTriggeredAt.trim() : "";
+  const triggerCount = Number.parseInt(String(reminder.triggerCount || ""), 10);
   if (!id || !accountId || !senderId || !contextToken || !text || !Number.isFinite(dueAtMs) || dueAtMs <= 0) {
     return null;
   }
@@ -100,6 +126,9 @@ function normalizeReminder(reminder) {
     text,
     dueAtMs,
     createdAt: createdAt || new Date().toISOString(),
+    followupDelayMinutes: Number.isFinite(followupDelayMinutes) && followupDelayMinutes > 0 ? followupDelayMinutes : 15,
+    lastTriggeredAt: lastTriggeredAt || "",
+    triggerCount: Number.isFinite(triggerCount) && triggerCount > 0 ? triggerCount : 0,
   };
 }
 

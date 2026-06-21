@@ -93,6 +93,9 @@ Notes:
 - Claude Code loads them through workspace-local `.mcp.json` injected by Cyberboss and passed to Claude at startup with `--mcp-config`.
 - Codex loads them through the runtime-side Cyberboss MCP bridge configured at spawn time.
 - The public human terminal surface stays intentionally small: lifecycle commands plus shared bridge scripts.
+- Seedbox tools use a simplified data model: only `wishseed` and `concern` are valid kinds.
+- Seedbox items are model-facing as `id`, `kind`, `title`, `tags`, `notes`, `createdAt`, `updatedAt`, plus `completedAt` after completion.
+- Do not treat legacy compatibility fields such as `status`, `priority`, `nextAction`, or `includeDone` as part of the current seedbox tool contract.
 
 ## Current WeChat Commands
 

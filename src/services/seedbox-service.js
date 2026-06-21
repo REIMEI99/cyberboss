@@ -2,10 +2,7 @@ const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
 
-const SEEDBOX_KINDS = new Set(["seed", "concern", "wish", "research", "followup", "find", "explore", "remember", "maintenance"]);
-const SEEDBOX_STATUSES = new Set(["pending", "active", "waiting", "done", "cancelled"]);
-const SEEDBOX_PRIORITIES = new Set(["low", "normal", "high"]);
-const DELIVERABLES = new Set(["silent", "message", "diary", "timeline", "briefing", "file"]);
+const SEEDBOX_KINDS = new Set(["wishseed", "concern"]);
 
 class SeedboxService {
   constructor({ config }) {
@@ -56,13 +53,6 @@ class SeedboxService {
       id: crypto.randomUUID(),
       kind: input.kind,
       title: input.title,
-      goal: input.goal || input.notes || input.title,
-      status: input.status || "pending",
-      priority: input.priority || "normal",
-      dueAt: input.dueAt,
-      dueAtMs: normalizeDueAtMs(input.dueAtMs || input.dueAt),
-      nextAction: input.nextAction,
-      deliverable: input.deliverable || "silent",
       tags: input.tags,
       notes: input.notes,
       createdAt: now,
@@ -77,14 +67,13 @@ class SeedboxService {
     return item;
   }
 
-  list({ status = "", kind = "", limit = 20, includeDone = false } = {}) {
+  list({ kind = "", limit = 20, includeCompleted = false, includeDone = false } = {}) {
     this.load();
-    const normalizedStatus = normalizeText(status);
     const normalizedKind = normalizeText(kind);
     const normalizedLimit = normalizeLimit(limit);
+    const shouldIncludeCompleted = includeCompleted === true || includeDone === true;
     const items = this.state.items
-      .filter((item) => includeDone || !["done", "cancelled"].includes(item.status))
-      .filter((item) => !normalizedStatus || item.status === normalizedStatus)
+      .filter((item) => shouldIncludeCompleted || !item.completedAt)
       .filter((item) => !normalizedKind || item.kind === normalizedKind)
       .slice(0, normalizedLimit);
     return {
@@ -108,11 +97,6 @@ class SeedboxService {
     const next = normalizeSeedboxItem({
       ...current,
       ...filterDefinedPatch(patch),
-      dueAtMs: Object.prototype.hasOwnProperty.call(patch, "dueAt")
-        ? normalizeDueAtMs(patch.dueAt)
-        : Object.prototype.hasOwnProperty.call(patch, "dueAtMs")
-          ? normalizeDueAtMs(patch.dueAtMs)
-          : current.dueAtMs,
       updatedAt: new Date().toISOString(),
     });
     if (!next) {
@@ -125,11 +109,27 @@ class SeedboxService {
   }
 
   complete({ id = "", notes = "" } = {}) {
-    return this.update({
-      id,
-      status: "done",
-      notes: normalizeText(notes) || undefined,
+    this.load();
+    const itemId = normalizeText(id);
+    if (!itemId) {
+      throw new Error("Seedbox complete requires id.");
+    }
+    const index = this.state.items.findIndex((item) => item.id === itemId);
+    if (index < 0) {
+      throw new Error(`Seedbox item not found: ${itemId}`);
+    }
+    const current = this.state.items[index];
+    const completedAt = new Date().toISOString();
+    const next = normalizeSeedboxItem({
+      ...current,
+      notes: normalizeText(notes) || current.notes,
+      completedAt,
+      updatedAt: completedAt,
     });
+    this.state.items[index] = next;
+    this.state.items.sort(compareSeedboxItems);
+    this.save();
+    return next;
   }
 }
 
@@ -138,16 +138,11 @@ function normalizeSeedboxItem(value) {
     return null;
   }
   const id = normalizeText(value.id);
-  const kind = normalizeChoice(value.kind, SEEDBOX_KINDS, "seed");
+  const kind = normalizeChoice(value.kind, SEEDBOX_KINDS, "wishseed");
   const title = normalizeText(value.title);
-  const goal = normalizeText(value.goal);
-  const status = normalizeChoice(value.status, SEEDBOX_STATUSES, "pending");
-  const priority = normalizeChoice(value.priority, SEEDBOX_PRIORITIES, "normal");
-  const nextAction = normalizeText(value.nextAction);
-  const deliverable = normalizeChoice(value.deliverable, DELIVERABLES, "silent");
   const createdAt = normalizeIsoTime(value.createdAt) || new Date().toISOString();
   const updatedAt = normalizeIsoTime(value.updatedAt) || createdAt;
-  const dueAtMs = normalizeDueAtMs(value.dueAtMs || value.dueAt);
+  const completedAt = resolveCompletedAt(value, updatedAt || createdAt);
   const tags = normalizeStringList(value.tags);
   const notes = normalizeText(value.notes);
 
@@ -158,16 +153,11 @@ function normalizeSeedboxItem(value) {
     id,
     kind,
     title,
-    goal,
-    status,
-    priority,
-    dueAtMs,
-    nextAction,
-    deliverable,
     tags,
     notes,
     createdAt,
     updatedAt,
+    completedAt,
   };
 }
 
@@ -182,40 +172,12 @@ function filterDefinedPatch(patch) {
 }
 
 function compareSeedboxItems(left, right) {
-  const leftStatus = statusRank(left.status);
-  const rightStatus = statusRank(right.status);
-  if (leftStatus !== rightStatus) {
-    return leftStatus - rightStatus;
+  const leftCompleted = Boolean(left.completedAt);
+  const rightCompleted = Boolean(right.completedAt);
+  if (leftCompleted !== rightCompleted) {
+    return leftCompleted ? 1 : -1;
   }
-  const leftPriority = priorityRank(left.priority);
-  const rightPriority = priorityRank(right.priority);
-  if (leftPriority !== rightPriority) {
-    return rightPriority - leftPriority;
-  }
-  const leftDue = left.dueAtMs || Number.MAX_SAFE_INTEGER;
-  const rightDue = right.dueAtMs || Number.MAX_SAFE_INTEGER;
-  if (leftDue !== rightDue) {
-    return leftDue - rightDue;
-  }
-  return String(left.updatedAt || "").localeCompare(String(right.updatedAt || ""));
-}
-
-function statusRank(status) {
-  return {
-    active: 0,
-    pending: 1,
-    waiting: 2,
-    done: 3,
-    cancelled: 4,
-  }[status] ?? 5;
-}
-
-function priorityRank(priority) {
-  return {
-    low: 0,
-    normal: 1,
-    high: 2,
-  }[priority] ?? 1;
+  return String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""));
 }
 
 function normalizeChoice(value, allowed, fallback) {
@@ -228,18 +190,6 @@ function normalizeStringList(value) {
     return [];
   }
   return value.map(normalizeText).filter(Boolean).slice(0, 20);
-}
-
-function normalizeDueAtMs(value) {
-  if (value === undefined || value === null || value === "") {
-    return 0;
-  }
-  const numeric = Number(value);
-  if (Number.isFinite(numeric) && numeric > 0) {
-    return numeric;
-  }
-  const parsed = Date.parse(String(value || "").trim());
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
 }
 
 function normalizeIsoTime(value) {
@@ -261,6 +211,18 @@ function normalizeLimit(value) {
 
 function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function resolveCompletedAt(value, fallbackTime) {
+  const completedAt = normalizeIsoTime(value.completedAt);
+  if (completedAt) {
+    return completedAt;
+  }
+  const legacyStatus = normalizeText(value.status).toLowerCase();
+  if (legacyStatus === "done" || legacyStatus === "cancelled") {
+    return normalizeIsoTime(value.updatedAt) || fallbackTime || new Date().toISOString();
+  }
+  return "";
 }
 
 module.exports = { SeedboxService };

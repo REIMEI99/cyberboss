@@ -93,7 +93,6 @@ const DEFAULT_HIDDEN_TOOL_NAMES = new Set([
   "cyberboss_obsidian_status",
   "cyberboss_obsidian_recent",
   "cyberboss_obsidian_random_daily_excerpt",
-  "cyberboss_title_pool_list",
   "cyberboss_system_send",
   "cyberboss_timeline_categories",
   "cyberboss_timeline_proposals",
@@ -105,9 +104,9 @@ const DEFAULT_HIDDEN_TOOL_NAMES = new Set([
 const PROJECT_TOOLS = [
   {
     name: "cyberboss_pulse_review",
-    description: "Run the default pulse review flow in one step: inspect current context, habit status, an Obsidian signal, future material worth revisiting, and whether there is a good reason to message the user or set a follow-up reminder.",
+    description: "Run the default pulse review flow in one step: inspect current context, habit status, an Obsidian signal, title-pool items, future material worth revisiting, and whether there is a good reason to message the user or set a follow-up reminder.",
     shortHint: "Run the default pulse review flow.",
-    topics: ["pulse", "habit", "obsidian", "seedbox", "reminder"],
+    topics: ["pulse", "habit", "obsidian", "pool", "seedbox", "reminder"],
     inputSchema: {
       type: "object",
       properties: {
@@ -116,6 +115,7 @@ const PROJECT_TOOLS = [
         userState: { type: "string", description: "Current inferred user state such as focused, low load, at home, after meal." },
         obsidianQuery: { type: "string", description: "Optional query for targeted Obsidian search. If omitted, a random daily excerpt is preferred." },
         includeObsidianExcerpt: { type: "boolean", description: "Whether to include a random daily-note excerpt when no query is provided. Defaults to true." },
+        includeTitlePool: { type: "boolean", description: "Whether to include current title-pool items. Defaults to true." },
         includeSeedbox: { type: "boolean", description: "Whether to include active seedbox items. Defaults to true." },
         includeMemories: { type: "boolean", description: "Whether to include a few recent durable memories. Defaults to true." },
         allowResearch: { type: "boolean", description: "Reserved flag for future evolving-research integration. Defaults to false." },
@@ -125,6 +125,7 @@ const PROJECT_TOOLS = [
     async handler({ services, args, context, runtimeContextStore }) {
       const turnIntent = normalizeTurnIntent(args.turnIntent);
       const includeObsidianExcerpt = args.includeObsidianExcerpt !== false;
+      const includeTitlePool = args.includeTitlePool !== false;
       const includeSeedbox = args.includeSeedbox !== false;
       const includeMemories = args.includeMemories !== false;
       const obsidianQuery = normalizeText(args.obsidianQuery);
@@ -178,6 +179,9 @@ const PROJECT_TOOLS = [
       const memories = includeMemories
         ? services.agentMemory.list({ limit: 5, includeArchived: false })
         : { count: 0, memories: [] };
+      const titlePool = includeTitlePool
+        ? services.titlePool.list({ limit: 8 })
+        : { count: 0, items: [] };
       const seedbox = includeSeedbox
         ? services.seedbox.list({ limit: 5, includeDone: false })
         : { count: 0, items: [] };
@@ -211,6 +215,7 @@ const PROJECT_TOOLS = [
         habitSuggestion,
         obsidian,
         memories,
+        titlePool,
         seedbox,
       });
 
@@ -225,6 +230,7 @@ const PROJECT_TOOLS = [
           habitSuggestion: normalizeHabitSuggestionForPulse(habitSuggestion),
           obsidian,
           memories: applyMemoryPulseExposure(memories, memoryExposure),
+          titlePool,
           seedbox: applySeedboxPulseExposure(seedbox, seedboxExposure),
           messageOpportunity: summary.messageOpportunity,
           followupOpportunity: summary.followupOpportunity,
@@ -232,6 +238,7 @@ const PROJECT_TOOLS = [
           exposureMode: {
             habit: habitExposure.mode,
             memories: memoryExposure.mode,
+            titlePool: includeTitlePool ? "full" : "disabled",
             seedbox: seedboxExposure.mode,
           },
           researchPolicy: {
@@ -254,8 +261,9 @@ const PROJECT_TOOLS = [
         summary: { type: "string", description: "Short reason for the follow-up decision." },
         needsFollowup: { type: "boolean", description: "Whether a follow-up reminder should usually be created. Defaults to true." },
         reminderText: { type: "string", description: "Exact reminder text. Falls back to summary." },
-        delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires." },
+        delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires. For immediate next-step tasks, prefer a short reminder." },
         dueAt: { type: "string", description: "Absolute reminder time such as 2026-04-07T21:30+08:00." },
+        followupDelayMinutes: { type: "integer", description: "Minutes between repeated reminder checks after the first fire. Defaults to a short sticky cadence." },
         userId: { type: "string", description: "Optional explicit WeChat user id." },
       },
       additionalProperties: false,
@@ -282,8 +290,11 @@ const PROJECT_TOOLS = [
       if (normalizeText(args.dueAt)) {
         reminderInput.dueAt = normalizeText(args.dueAt);
       }
+      if (Number.isInteger(args.followupDelayMinutes)) {
+        reminderInput.followupDelayMinutes = args.followupDelayMinutes;
+      }
       if (!reminderInput.delayMinutes && !reminderInput.dueAt) {
-        reminderInput.delayMinutes = 180;
+        reminderInput.delayMinutes = 15;
       }
 
       const reminder = await services.reminder.create(reminderInput, context);
@@ -299,7 +310,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_title_pool_add",
-    description: "Add one short action title to the lightweight title pool. Use this for sudden short action utterances that should not be lost, without forcing a reminder or seedbox decision yet.",
+    description: "Add one short action title to the lightweight title pool. Use this when the user mentions something they intend to do and it should not be lost, but a time-based reminder is not yet the right move.",
     shortHint: "Add a short action title to title pool.",
     topics: ["pool", "reminder", "seedbox"],
     inputSchema: {
@@ -335,6 +346,33 @@ const PROJECT_TOOLS = [
       return {
         text: `Title pool items loaded: ${result.count}.`,
         data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_title_pool_review",
+    description: "Review current title-pool items during pulse or quiet reflection. Use this before deciding whether one short action title should stay, be removed, or be promoted into a reminder.",
+    shortHint: "Review title-pool items for pulse follow-up.",
+    topics: ["pool", "pulse", "reminder"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Optional maximum item count. Defaults to 8." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.titlePool.list({
+        limit: Number.isInteger(args.limit) ? args.limit : 8,
+      });
+      return {
+        text: result.count
+          ? `Title pool review loaded: ${result.count}.`
+          : "Title pool review loaded: empty.",
+        data: {
+          ...result,
+          guidance: "Use these short titles to decide whether to stay silent, follow up, remove a finished item, or promote one item to reminder.",
+        },
       };
     },
   },
@@ -384,11 +422,45 @@ const PROJECT_TOOLS = [
           dueAt: args.dueAt,
           userId: args.userId,
         }, context);
+       return {
+         text: `Title pool item promoted to reminder: ${item.title}`,
+         data: {
+           item,
+           reminder,
+         },
+       };
+     } catch (error) {
+       services.titlePool.add({ title: item.title });
+       throw error;
+     }
+   },
+ },
+  {
+    name: "cyberboss_title_pool_promote_to_seedbox",
+    description: "Promote one title pool item into a seedbox item, then remove it from the title pool. Use this when a lightweight current-action title turns out to be future-useful material worth preserving across turns.",
+    shortHint: "Promote a title pool item to seedbox.",
+    topics: ["pool", "seedbox"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string", description: "Title pool item id." },
+        kind: { type: "string", description: "wishseed or concern. Defaults to wishseed." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const item = services.titlePool.remove({ id: args.id });
+      try {
+        const seedbox = services.seedbox.create({
+          title: item.title,
+          kind: normalizeText(args.kind) || "wishseed",
+        });
         return {
-          text: `Title pool item promoted to reminder: ${item.title}`,
+          text: `Title pool item promoted to seedbox: ${item.title}`,
           data: {
             item,
-            reminder,
+            seedbox,
           },
         };
       } catch (error) {
@@ -626,23 +698,17 @@ const PROJECT_TOOLS = [
       };
     },
   },
-  {
-    name: "cyberboss_seedbox_create",
-    description: "Create a structured seedbox item for unresolved worries, things to learn later, future threads, or concrete finds the agent should not lose across turns.",
-    shortHint: "Create a seedbox item.",
+ {
+   name: "cyberboss_seedbox_create",
+    description: "Create a structured seedbox item for future-oriented material the agent should not lose across turns. Use wishseed for things to do, try, buy, read, or revisit later; use concern for unresolved worries or risks.",
+   shortHint: "Create a seedbox item.",
     topics: ["seedbox", "memory", "research"],
-    inputSchema: {
-      type: "object",
-      required: ["title"],
+   inputSchema: {
+     type: "object",
+     required: ["title"],
       properties: {
-        kind: { type: "string", description: "Optional seed type such as seed, concern, wish, research, followup, or find." },
+        kind: { type: "string", description: "Optional kind: wishseed (future action, idea, saved find, or thing to revisit) or concern (unresolved worry or risk). Defaults to wishseed." },
         title: { type: "string", description: "Short seedbox title." },
-        goal: { type: "string", description: "Optional why-keep field: why this item should survive and what future value it may hold." },
-        status: { type: "string", description: "Optional compatibility field: pending, active, waiting, done, or cancelled." },
-        priority: { type: "string", description: "Optional compatibility field. Usually omit unless one seedbox item clearly deserves more attention." },
-        dueAt: { type: "string", description: "Optional compatibility field. Prefer reminder for actual time-based follow-up." },
-        nextAction: { type: "string", description: "Optional smallest useful next step if this seedbox item later becomes actionable." },
-        deliverable: { type: "string", description: "Optional future output shape such as silent, message, diary, timeline, briefing, or file." },
         tags: { type: "array", items: { type: "string" } },
         notes: { type: "string", description: "Optional raw details, links, quotes, products, worries, or context that should stay attached to the seedbox item." },
       },
@@ -664,10 +730,9 @@ const PROJECT_TOOLS = [
     inputSchema: {
       type: "object",
       properties: {
-        status: { type: "string", description: "Optional status filter." },
         kind: { type: "string", description: "Optional kind filter." },
         limit: { type: "integer", description: "Optional maximum seedbox item count." },
-        includeDone: { type: "boolean", description: "Whether to include done/cancelled seedbox items." },
+        includeCompleted: { type: "boolean", description: "Whether to include completed seedbox items." },
       },
       additionalProperties: false,
     },
@@ -679,24 +744,18 @@ const PROJECT_TOOLS = [
       };
     },
   },
-  {
-    name: "cyberboss_seedbox_update",
-    description: "Update a structured seedbox item after it becomes clearer, more relevant, more concrete, or less useful.",
-    shortHint: "Update a seedbox item.",
-    topics: ["seedbox", "memory", "research"],
-    inputSchema: {
-      type: "object",
-      required: ["id"],
+ {
+   name: "cyberboss_seedbox_update",
+   description: "Update a structured seedbox item after it becomes clearer, more relevant, more concrete, or less useful.",
+   shortHint: "Update a seedbox item.",
+   topics: ["seedbox", "memory", "research"],
+   inputSchema: {
+     type: "object",
+     required: ["id"],
       properties: {
         id: { type: "string" },
-        kind: { type: "string" },
+        kind: { type: "string", description: "wishseed or concern." },
         title: { type: "string" },
-        goal: { type: "string" },
-        status: { type: "string", description: "pending, active, waiting, done, or cancelled." },
-        priority: { type: "string", description: "low, normal, or high." },
-        dueAt: { type: "string" },
-        nextAction: { type: "string" },
-        deliverable: { type: "string", description: "silent, message, diary, timeline, briefing, or file." },
         tags: { type: "array", items: { type: "string" } },
         notes: { type: "string" },
       },
@@ -759,8 +818,8 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_reminder_create",
-    description: "Create a reminder as a future follow-up anchor in Cyberboss. Use this when the system should come back to an open loop later.",
-    shortHint: "Create a follow-up reminder with direct text plus delayMinutes or dueAt.",
+    description: "Create a reminder as a future follow-up anchor in Cyberboss. Reminders are sticky by default: after they fire, Cyberboss keeps checking again until the reminder is explicitly cleared.",
+    shortHint: "Create a sticky follow-up reminder with direct text plus delayMinutes or dueAt.",
     topics: ["reminder"],
     inputSchema: {
       type: "object",
@@ -769,6 +828,7 @@ const PROJECT_TOOLS = [
         text: { type: "string", description: "Reminder text that preserves the future follow-up hook." },
         delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires." },
         dueAt: { type: "string", description: "Absolute time such as 2026-04-07T21:30+08:00." },
+        followupDelayMinutes: { type: "integer", description: "Minutes between repeated reminder checks after the first fire. Defaults to a short sticky cadence." },
         userId: { type: "string", description: "Optional explicit WeChat user id." },
       },
       additionalProperties: false,
@@ -777,6 +837,48 @@ const PROJECT_TOOLS = [
       const result = await services.reminder.create(args, context);
       return {
         text: `Reminder queued: ${result.id}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_reminder_list",
+    description: "List active reminders. Use this before clearing a reminder after the user explicitly says the action is done.",
+    shortHint: "List active reminders for the current user.",
+    topics: ["reminder"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        userId: { type: "string", description: "Optional explicit WeChat user id." },
+        limit: { type: "integer", description: "Optional maximum active reminder count." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args, context }) {
+      const result = services.reminder.list(args, context);
+      return {
+        text: `Active reminders loaded: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_reminder_complete",
+    description: "Clear one active reminder after the user explicitly confirms the action is done or no longer needed.",
+    shortHint: "Clear an active reminder by id.",
+    topics: ["reminder"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string", description: "Reminder id to clear." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.reminder.complete(args);
+      return {
+        text: `Reminder cleared: ${result.id}`,
         data: result,
       };
     },
@@ -1367,11 +1469,13 @@ function buildPulseReviewSummary({
   habitSuggestion,
   obsidian,
   memories,
+  titlePool,
   seedbox,
 }) {
   const incompleteHabits = Array.isArray(habitStatus?.habits)
     ? habitStatus.habits.filter((item) => item?.dailyState === "incomplete")
     : [];
+  const openTitlePoolItems = Array.isArray(titlePool?.items) ? titlePool.items : [];
   const openSeedboxItems = Array.isArray(seedbox?.items) ? seedbox.items : [];
   const durableMemories = Array.isArray(memories?.memories) ? memories.memories : [];
 
@@ -1380,6 +1484,7 @@ function buildPulseReviewSummary({
     context: normalizeText(context),
     userState: normalizeText(userState),
     incompleteHabitCount: incompleteHabits.length,
+    titlePoolCount: openTitlePoolItems.length,
     openSeedboxCount: openSeedboxItems.length,
     memoryCount: durableMemories.length,
     obsidianSource: normalizeText(obsidian?.source) || "none",
@@ -1401,6 +1506,9 @@ function buildPulseReviewSummary({
   }
   if (!reasons.length && hasInterestingObsidianSignal) {
     reasons.push("Obsidian contains a potentially relevant signal, but it may only justify private review");
+  }
+  if (!reasons.length && openTitlePoolItems.length) {
+    reasons.push("there are short current-action titles worth a quick review before they disappear");
   }
   if (!reasons.length && openSeedboxItems.length) {
     reasons.push("there is internal carry-over material worth keeping in view, but none clearly requires interrupting the user");
@@ -1433,6 +1541,9 @@ function buildPulseReviewSummary({
   }
   if (followupOpportunity.shouldSetReminder && !shouldContactForReminder) {
     recommendedPrivateActions.push("set a reminder for today's incomplete habit instead of letting it disappear");
+  }
+  if (openTitlePoolItems.length) {
+    recommendedPrivateActions.push("review whether one short title-pool item should be removed, quietly followed up, or promoted to reminder");
   }
   if (openSeedboxItems.length) {
     recommendedPrivateActions.push("review whether one seedbox item should be clarified, preserved, or quietly advanced");
@@ -1607,7 +1718,7 @@ function applySeedboxPulseExposure(seedbox, exposure) {
     items: [],
     summary: {
       titles: items.slice(0, 3).map((item) => normalizeText(item?.title)).filter(Boolean),
-      statuses: uniqueNonEmpty(items.slice(0, 5).map((item) => normalizeText(item?.status))),
+      kinds: uniqueNonEmpty(items.slice(0, 5).map((item) => normalizeText(item?.kind))),
     },
     exposureMode: "summary",
     exposureReason: exposure?.reason || "",

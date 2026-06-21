@@ -439,6 +439,11 @@ Agent-facing Cyberboss capabilities are project-native structured tools.
 - `whereabouts_recent_moves`
 - `whereabouts_snapshot`
 - `whereabouts_summary`
+
+Seedbox note:
+- Seedbox now uses only two kinds: `wishseed` and `concern`.
+- The active item shape is intentionally minimal: `id`, `kind`, `title`, `tags`, `notes`, `createdAt`, `updatedAt`.
+- Completed items use `completedAt`; seedbox no longer treats `status`, `priority`, or `nextAction` as model-facing fields.
 - `cyberboss_sticker_tags`
 - `cyberboss_sticker_pick`
 - `cyberboss_sticker_send`

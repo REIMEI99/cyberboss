@@ -65,6 +65,10 @@ async function flushDueReminders(app, account) {
 
   for (const reminder of dueReminders) {
     try {
+      app.reminderQueue.defer({
+        id: reminder.id,
+        dueAtMs: Date.now() + resolveReminderFollowupDelayMs(reminder),
+      });
       app.systemMessageQueue.enqueue({
         id: `reminder:${reminder.id}`,
         accountId: reminder.accountId,
@@ -75,10 +79,12 @@ async function flushDueReminders(app, account) {
         createdAt: new Date().toISOString(),
       });
     } catch {
-      app.reminderQueue.enqueue({
-        ...reminder,
-        dueAtMs: Date.now() + 5_000,
-      });
+      try {
+        app.reminderQueue.defer({
+          id: reminder.id,
+          dueAtMs: Date.now() + 5_000,
+        });
+      } catch {}
     }
   }
 }
@@ -86,10 +92,20 @@ async function flushDueReminders(app, account) {
 function buildReminderSystemTrigger(reminder, config) {
   const body = normalizeText(reminder?.text);
   const userName = normalizeText(config?.userName) || "the user";
+  const followupDelayMinutes = Number.parseInt(String(reminder?.followupDelayMinutes || ""), 10);
+  const effectiveFollowupDelayMinutes = Number.isFinite(followupDelayMinutes) && followupDelayMinutes > 0
+    ? followupDelayMinutes
+    : 15;
   if (!body) {
-    return `A due reminder fired for ${userName}. Decide the best action now.`;
+    return `A due reminder fired for ${userName}. Act now. This reminder stays active until explicit completion, and the queue has already scheduled the next check in about ${effectiveFollowupDelayMinutes} minutes unless you later clear it.`;
   }
-  return `A due reminder fired for ${userName}. Reminder: ${body}`;
+  return `A due reminder fired for ${userName}. Reminder: ${body}\nThis reminder stays active until explicit completion, and the queue has already scheduled the next check in about ${effectiveFollowupDelayMinutes} minutes unless you later clear it.\nDo not assume the user already acted just because the reminder fired.\nIf recent context clearly shows the user already did it, list active reminders and clear the matching one. Otherwise treat this as an active follow-up.`;
+}
+
+function resolveReminderFollowupDelayMs(reminder) {
+  const minutes = Number.parseInt(String(reminder?.followupDelayMinutes || ""), 10);
+  const effectiveMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
+  return effectiveMinutes * 60_000;
 }
 
 function normalizeText(value) {

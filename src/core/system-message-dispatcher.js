@@ -57,11 +57,14 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse" } =
     `Turn intent: ${resolveSystemTurnIntent(effectiveKind)}.`,
     `System kind: ${effectiveKind}.`,
     effectiveKind === "reminder"
-      ? "This is a due reminder. Act on it now. Do not treat it as optional."
+      ? "This is a due reminder. Act on it now. Do not treat it as optional or as implicit completion."
       : "This is a pulse-like trigger. Review context, decide whether to contact the user, and decide follow-up.",
     "Default first step: use cyberboss_pulse_review unless the trigger already gives you enough context.",
     "Read the situation in this order: context, today's habit state, Obsidian signal, seed-like carry-over material, whether user contact is useful now, and whether later follow-up should become a reminder.",
-    "Reminder is the default follow-up substrate. If an open loop may matter later, either create a reminder or conclude clearly that no reminder is needed.",
+    "Reminder is the default follow-up substrate. If an open loop may matter later, either create a reminder, store a short action in the title pool, or conclude clearly that neither is needed.",
+    effectiveKind === "reminder"
+      ? "Due reminders stay active until explicitly cleared. Do not assume the user already did it just because the reminder fired. If recent context clearly shows completion, list active reminders and clear the matching one."
+      : "Do not assume that the user will remember or act just because they said it out loud.",
     "Habit closure matters. If a habit is still incomplete today, either nudge now or set a reminder to check later. If the user already confirmed completion or clean abandonment, prefer writing the habit state.",
     "If you return silent, that should follow useful private work or a clear judgment that nothing useful should be done now.",
     "Return exactly one JSON object after any tool calls:",

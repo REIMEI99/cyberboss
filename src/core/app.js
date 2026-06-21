@@ -893,6 +893,7 @@ class CyberbossApp {
       .listAll()
       .filter((reminder) => reminder.accountId === prepared.accountId && reminder.senderId === prepared.senderId)
       .map((reminder) => reminder.id);
+    const baselineTitlePoolIds = this.projectServices?.titlePool?.list?.({ limit: 50 })?.items?.map((item) => item.id) || [];
     this.pendingFollowupAuditByRunKey.set(buildRunKey(threadId, turnId), {
       threadId,
       turnId,
@@ -902,6 +903,7 @@ class CyberbossApp {
       senderId: prepared.senderId,
       originalText,
       baselineReminderIds,
+      baselineTitlePoolIds,
     });
   }
 
@@ -1665,6 +1667,8 @@ function shouldAuditUserFollowup(text) {
   const futureIntentPatterns = [
     /\b(?:later|soon|afterwards|tomorrow|tonight|next time|eventually)\b/i,
     /\b(?:i(?:'| a)?m going to|i will|i should|i need to|i plan to|remind me|don't let me forget)\b/i,
+    /(?:我要|我得|我去|我先去|我先做|我准备|我待会|等下我|一会我).{0,20}(?:做|去|拿|买|点|回|发|问|洗|收|看|处理)/u,
+    /(?:记得|提醒我|别忘了|等会提醒|之后提醒)/u,
   ];
   return directFutureWords.some((item) => normalized.includes(item))
     || futureIntentPhrases.some((item) => normalized.includes(item))

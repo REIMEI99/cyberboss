@@ -53,20 +53,24 @@ Habit is not:
 
 ### Seedbox
 
-Seedbox stores unresolved, unexpanded, or someday-useful material that should survive across turns.
+Seedbox stores unresolved, unexpanded, or someday-useful material that should survive across turns. It is organized into two kinds:
+
+- `wishseed`: future things to do, items to try or buy, content to read or watch, saved links, half-formed ideas, and anything the user may want to revisit later.
+- `concern`: unresolved worries, risks, or heavy matters that should stay on the radar.
 
 Typical seedbox contents:
 
-- a worry the user has not unpacked yet
-- something she wants to learn later
-- a possible future thread
-- a find, link, quote, product, or idea worth keeping
+- a worry the user has not unpacked yet (`concern`)
+- something she wants to learn or try later (`wishseed`)
+- a possible future thread (`wishseed`)
+- a find, link, quote, product, or idea worth keeping (`wishseed`)
 
 Seedbox is not:
 
 - a sprint board
 - a strict task manager
 - the default timing mechanism
+- a place for model-facing workflow fields like `status`, `priority`, or `nextAction`
 
 Reminder owns timing. Seedbox owns preservation.
 
@@ -131,7 +135,7 @@ When habit is relevant, the model should usually do one of:
 2. schedule a reminder
 3. mark the state explicitly
 
-### Seed Preservation Rule
+### Seedbox Preservation Rule
 
 If something matters enough to revisit but not enough to formalize, prefer `seedbox` over durable memory.
 

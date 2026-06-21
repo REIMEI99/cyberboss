@@ -13,7 +13,22 @@ function createHost() {
       },
       reminder: {
         async create(args) {
-          return { id: "reminder-1", ...args };
+          return { id: "reminder-1", followupDelayMinutes: args.followupDelayMinutes || 15, ...args };
+        },
+        list(args) {
+          return {
+            count: 1,
+            reminders: [{
+              id: "reminder-1",
+              text: "order food",
+              followupDelayMinutes: 15,
+              senderId: args.userId || "user-1",
+              dueAtMs: 123,
+            }],
+          };
+        },
+        complete(args) {
+          return { id: args.id, text: "order food" };
         },
       },
       agentResearch: {
@@ -33,6 +48,59 @@ function createHost() {
       system: {
         queueMessage(args) {
           return { id: "system-1", ...args };
+        },
+      },
+      seedbox: {
+        create(args) {
+          return {
+            id: "seed-1",
+            kind: args.kind || "wishseed",
+            title: args.title,
+            tags: args.tags || [],
+            notes: args.notes || "",
+            createdAt: "2026-06-21T00:00:00.000Z",
+            updatedAt: "2026-06-21T00:00:00.000Z",
+            completedAt: "",
+          };
+        },
+        list(args) {
+          return {
+            count: 1,
+            items: [{
+              id: "seed-1",
+              kind: args.kind || "wishseed",
+              title: "Read later",
+              tags: [],
+              notes: "",
+              createdAt: "2026-06-21T00:00:00.000Z",
+              updatedAt: "2026-06-21T00:00:00.000Z",
+              completedAt: "",
+            }],
+          };
+        },
+        update(args) {
+          return {
+            id: args.id,
+            kind: args.kind || "wishseed",
+            title: args.title || "Read later",
+            tags: args.tags || [],
+            notes: args.notes || "",
+            createdAt: "2026-06-21T00:00:00.000Z",
+            updatedAt: "2026-06-21T01:00:00.000Z",
+            completedAt: "",
+          };
+        },
+        complete(args) {
+          return {
+            id: args.id,
+            kind: "wishseed",
+            title: "Read later",
+            tags: [],
+            notes: args.notes || "",
+            createdAt: "2026-06-21T00:00:00.000Z",
+            updatedAt: "2026-06-21T02:00:00.000Z",
+            completedAt: "2026-06-21T02:00:00.000Z",
+          };
         },
       },
       habit: {
@@ -324,6 +392,38 @@ test("tool host exposes dedicated research tools", async () => {
   assert.equal(archiveResult.text, "Research archived: retail research");
 });
 
+test("tool host exposes simplified seedbox tools without legacy fields in schema", async () => {
+  const host = createHost();
+  const createTool = host.listTools().find((tool) => tool.name === "cyberboss_seedbox_create");
+  const listTool = host.listTools().find((tool) => tool.name === "cyberboss_seedbox_list");
+  const updateTool = host.listTools().find((tool) => tool.name === "cyberboss_seedbox_update");
+
+  assert.ok(createTool);
+  assert.ok(listTool);
+  assert.ok(updateTool);
+  assert.doesNotMatch(createTool.description, /status|priority|nextAction/);
+  assert.doesNotMatch(listTool.description, /includeDone|status/);
+  assert.doesNotMatch(updateTool.description, /status|priority|nextAction/);
+
+  const createResult = await host.invokeTool("cyberboss_seedbox_create", {
+    kind: "concern",
+    title: "Housing uncertainty",
+    notes: "Keep an eye on it.",
+  }, {});
+  const listResult = await host.invokeTool("cyberboss_seedbox_list", {
+    kind: "concern",
+    includeCompleted: true,
+  }, {});
+  const updateResult = await host.invokeTool("cyberboss_seedbox_update", {
+    id: "seed-1",
+    title: "Housing plan",
+  }, {});
+
+  assert.equal(createResult.text, "Seedbox item stored: Housing uncertainty");
+  assert.equal(listResult.text, "Seedbox items loaded: 1.");
+  assert.equal(updateResult.text, "Seedbox item updated: Housing plan");
+});
+
 test("tool host exposes habit tools", async () => {
   const host = createHost();
   const upsertResult = await host.invokeTool("cyberboss_habit_upsert", {
@@ -394,6 +494,24 @@ test("tool host validates structured reminder input types", async () => {
       delayMinutes: "30",
     }, {});
   }, /input\.delayMinutes must be an integer/);
+});
+
+test("tool host exposes sticky reminder list and complete tools", async () => {
+  const host = createHost();
+  const createTool = host.listTools().find((tool) => tool.name === "cyberboss_reminder_create");
+  const listTool = host.listTools().find((tool) => tool.name === "cyberboss_reminder_list");
+  const completeTool = host.listTools().find((tool) => tool.name === "cyberboss_reminder_complete");
+
+  assert.ok(createTool);
+  assert.ok(listTool);
+  assert.ok(completeTool);
+  assert.match(createTool.description, /sticky/i);
+
+  const listResult = await host.invokeTool("cyberboss_reminder_list", {}, {});
+  const completeResult = await host.invokeTool("cyberboss_reminder_complete", { id: "reminder-1" }, {});
+
+  assert.equal(listResult.text, "Active reminders loaded: 1.");
+  assert.equal(completeResult.text, "Reminder cleared: reminder-1");
 });
 
 test("tool host exposes sticker tools with compact structured outputs", async () => {

@@ -24,6 +24,7 @@ class ReminderService {
   async create({
     delay = "",
     delayMinutes = undefined,
+    followupDelayMinutes = undefined,
     at = "",
     dueAt = "",
     text = "",
@@ -65,9 +66,44 @@ class ReminderService {
       contextToken,
       text: body,
       dueAtMs,
+      followupDelayMinutes: resolveFollowupDelayMinutes({
+        delay,
+        delayMinutes,
+        dueAt,
+        followupDelayMinutes,
+      }),
       createdAt: new Date().toISOString(),
     });
     return reminder;
+  }
+
+  list({ userId = "", limit = 20 } = {}, context = {}) {
+    const account = resolveSelectedAccount(this.config);
+    const senderId = resolveReminderSenderId({
+      config: this.config,
+      accountId: account.accountId,
+      explicitUser: userId,
+      context,
+      sessionStore: this.sessionStore,
+    });
+    const normalizedLimit = normalizeLimit(limit);
+    const reminders = this.queue
+      .listAll()
+      .filter((reminder) => reminder.accountId === account.accountId)
+      .filter((reminder) => !senderId || reminder.senderId === senderId)
+      .slice(0, normalizedLimit);
+    return {
+      count: reminders.length,
+      reminders,
+    };
+  }
+
+  complete({ id = "" } = {}) {
+    const reminderId = normalizeText(id);
+    if (!reminderId) {
+      throw new Error("Reminder complete requires id.");
+    }
+    return this.queue.complete({ id: reminderId });
   }
 }
 
@@ -105,6 +141,30 @@ function resolveDueAtMs({ delay = "", delayMinutes = undefined, at = "", dueAt =
     return scheduledAtMs;
   }
   return 0;
+}
+
+function resolveFollowupDelayMinutes({
+  delay = "",
+  delayMinutes = undefined,
+  dueAt = "",
+  followupDelayMinutes = undefined,
+} = {}) {
+  const explicit = Number.parseInt(String(followupDelayMinutes || ""), 10);
+  if (Number.isFinite(explicit) && explicit > 0) {
+    return explicit;
+  }
+  const directMinutes = Number.parseInt(String(delayMinutes || ""), 10);
+  if (Number.isFinite(directMinutes) && directMinutes > 0) {
+    return clampFollowupDelayMinutes(directMinutes);
+  }
+  const parsedDelayMs = parseDelay(delay);
+  if (parsedDelayMs > 0) {
+    return clampFollowupDelayMinutes(Math.round(parsedDelayMs / 60_000));
+  }
+  if (parseAbsoluteTime(dueAt) > 0) {
+    return 30;
+  }
+  return 15;
 }
 
 function parseDelayMinutes(rawValue) {
@@ -187,10 +247,27 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function normalizeLimit(value) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 20;
+  }
+  return Math.min(parsed, 100);
+}
+
+function clampFollowupDelayMinutes(value) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return 15;
+  }
+  return Math.max(5, Math.min(parsed, 180));
+}
+
 module.exports = {
   ReminderService,
   parseAbsoluteTime,
   parseDelay,
   parseDelayMinutes,
+  resolveFollowupDelayMinutes,
   resolveDueAtMs,
 };
