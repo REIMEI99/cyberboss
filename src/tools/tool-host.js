@@ -221,7 +221,7 @@ const PROJECT_TOOLS = [
           turnIntent,
           currentContextSummary: summary.currentContextSummary,
           habitStatus: applyHabitPulseExposure(habitStatus, habitExposure),
-          habitSuggestion,
+          habitSuggestion: normalizeHabitSuggestionForPulse(habitSuggestion),
           obsidian,
           memories: applyMemoryPulseExposure(memories, memoryExposure),
           seedbox: applySeedboxPulseExposure(seedbox, seedboxExposure),
@@ -1544,6 +1544,16 @@ function summarizeHabitStatus(habits) {
 
 function uniqueNonEmpty(values) {
   return [...new Set((Array.isArray(values) ? values : []).filter(Boolean))];
+}
+
+function normalizeHabitSuggestionForPulse(habitSuggestion) {
+  const suggestion = habitSuggestion && typeof habitSuggestion === "object"
+    ? { ...habitSuggestion }
+    : {};
+  if (!normalizeText(suggestion.reason)) {
+    delete suggestion.reason;
+  }
+  return suggestion;
 }
 
 function buildToolDescription(tool) {
