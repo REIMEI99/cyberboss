@@ -50,6 +50,24 @@ function truncateForLog(value, max) {
   return text.length <= max ? text : `${text.slice(0, max)}…`;
 }
 
+// apiPost wraps fetch rejections as `new Error("... request failed for <url>", { cause })`,
+// so the original AbortError lives on `.cause`. Walk the chain to detect long-poll timeouts,
+// which are the expected "no new messages" outcome and must be swallowed by getUpdates.
+function isAbortError(error) {
+  let current = error;
+  const seen = new Set();
+  while (current && typeof current === "object" && !seen.has(current)) {
+    seen.add(current);
+    const name = typeof current.name === "string" ? current.name : "";
+    const message = typeof current.message === "string" ? current.message : "";
+    if (name === "AbortError" || /aborted/i.test(message)) {
+      return true;
+    }
+    current = current.cause;
+  }
+  return false;
+}
+
 async function apiPost({ baseUrl, endpoint, token, body, timeoutMs = 0, label }) {
   const url = new URL(endpoint, ensureTrailingSlash(baseUrl)).toString();
   const controller = new AbortController();
@@ -198,7 +216,7 @@ async function getUpdates({ baseUrl, token, getUpdatesBuf = "", timeoutMs = DEFA
     });
     return parseJson(raw, "getUpdates");
   } catch (error) {
-    if (error instanceof Error && (error.name === "AbortError" || String(error.message || "").includes("aborted"))) {
+    if (isAbortError(error)) {
       return { ret: 0, msgs: [], get_updates_buf: getUpdatesBuf };
     }
     throw error;
