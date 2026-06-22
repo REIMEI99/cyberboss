@@ -256,6 +256,21 @@ class AgentMemoryService {
     });
   }
 
+  delete({ id = "" } = {}) {
+    this.loadSync();
+    const memoryId = normalizeText(id);
+    if (!memoryId) {
+      throw new Error("Memory delete requires id.");
+    }
+    const index = this.state.memories.findIndex((memory) => memory.id === memoryId);
+    if (index < 0) {
+      throw new Error(`Memory not found: ${memoryId}`);
+    }
+    const [removed] = this.state.memories.splice(index, 1);
+    this.save();
+    return { id: removed.id, deleted: true, subject: removed.subject || "" };
+  }
+
   updateSync({ id = "", ...patch } = {}) {
     this.loadSync();
     const memoryId = normalizeText(id);
