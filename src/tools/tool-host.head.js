@@ -1,4 +1,4 @@
-const fs = require("fs");
+﻿const fs = require("fs");
 const { WhereaboutsToolHost } = require("whereabouts-mcp");
 const {
   STICKER_DESC_GUIDANCE,
@@ -99,7 +99,7 @@ const DEFAULT_HIDDEN_TOOL_NAMES = new Set([
 const PROJECT_TOOLS = [
   {
     name: "cyberboss_pulse_review",
-    description: "Run the default pulse review flow in one step: inspect current context, habit status, an Obsidian signal, current activities, future material worth revisiting, and whether there is a good reason to message the user or set a follow-up reminder.",
+    description: "Run the default pulse review flow in one step: inspect current context, habit status, an Obsidian signal, title-pool items, future material worth revisiting, and whether there is a good reason to message the user or set a follow-up reminder.",
     shortHint: "Run the default pulse review flow.",
     topics: ["pulse", "habit", "obsidian", "pool", "reminder"],
     inputSchema: {
@@ -109,19 +109,18 @@ const PROJECT_TOOLS = [
         context: { type: "string", description: "Current scene, recent conversation context, or what the user seems to be doing." },
         userState: { type: "string", description: "Current inferred user state such as focused, low load, at home, after meal." },
         obsidianQuery: { type: "string", description: "Optional query for targeted Obsidian search. If omitted, a random daily excerpt is preferred." },
-     includeObsidianExcerpt: { type: "boolean", description: "Whether to include a random daily-note excerpt when no query is provided. Defaults to true." },
-      includeMemories: { type: "boolean", description: "Whether to include a few recent durable memories. Defaults to true." },
-     includeActivities: { type: "boolean", description: "Whether to include current open activities. Defaults to true." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args, context, runtimeContextStore }) {
-     const turnIntent = normalizeTurnIntent(args.turnIntent);
-    const includeObsidianExcerpt = args.includeObsidianExcerpt !== false;
-    const includeMemories = args.includeMemories !== false;
-     const includeActivities = args.includeActivities !== false;
-    const activityLimit = Number.isInteger(args.activityLimit) && args.activityLimit > 0 ? args.activityLimit : 10;
-    const obsidianQuery = normalizeText(args.obsidianQuery);
+        includeObsidianExcerpt: { type: "boolean", description: "Whether to include a random daily-note excerpt when no query is provided. Defaults to true." },
+       includeTitlePool: { type: "boolean", description: "Whether to include current title-pool items. Defaults to true." },
+       includeMemories: { type: "boolean", description: "Whether to include a few recent durable memories. Defaults to true." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args, context, runtimeContextStore }) {
+      const turnIntent = normalizeTurnIntent(args.turnIntent);
+      const includeObsidianExcerpt = args.includeObsidianExcerpt !== false;
+     const includeTitlePool = args.includeTitlePool !== false;
+     const includeMemories = args.includeMemories !== false;
+      const obsidianQuery = normalizeText(args.obsidianQuery);
       const pulseWorkspaceKey = resolvePulseWorkspaceKey(context);
       const habitClosureSnapshot = services.habit.getTodayClosureSnapshot();
 
@@ -167,16 +166,13 @@ const PROJECT_TOOLS = [
         }
       } catch (error) {
         obsidian.error = error?.message || String(error);
-     }
+      }
 
-     const activities = includeActivities
-        ? {
-            ...services.activity.list({ limit: activityLimit }),
-            stale: services.activity.reviewStale(),
-          }
-        : { count: 0, activities: [], stale: { count: 0, activities: [] } };
+      const titlePool = includeTitlePool
+        ? services.titlePool.list({ limit: 8 })
+        : { count: 0, items: [] };
 
-     const habitExposure = decidePulseExposure({
+      const habitExposure = decidePulseExposure({
         runtimeContextStore,
         workspaceKey: pulseWorkspaceKey,
         moduleName: "habit",
@@ -197,12 +193,12 @@ const PROJECT_TOOLS = [
         userState: args.userState,
         habitStatus,
         habitSuggestion,
-       obsidian,
-      memories,
-      activities,
-   });
+        obsidian,
+        memories,
+       titlePool,
+     });
 
-    return {
+      return {
         text: summary.messageOpportunity.shouldContactUser
           ? "Pulse review found a plausible user-facing opening."
           : "Pulse review completed with no strong user-facing opening.",
@@ -212,16 +208,16 @@ const PROJECT_TOOLS = [
           habitStatus: applyHabitPulseExposure(habitStatus, habitExposure),
           habitSuggestion: normalizeHabitSuggestionForPulse(habitSuggestion),
           obsidian,
-        memories,
-        activities,
-        messageOpportunity: summary.messageOpportunity,
+          memories,
+          titlePool,
+          messageOpportunity: summary.messageOpportunity,
           followupOpportunity: summary.followupOpportunity,
           recommendedPrivateActions: summary.recommendedPrivateActions,
           exposureMode: {
             habit: habitExposure.mode,
-           memories: memoryExposureMode,
-          activities: includeActivities ? "full" : "disabled",
-         },
+            memories: memoryExposureMode,
+            titlePool: includeTitlePool ? "full" : "disabled",
+          },
         },
       };
     },
@@ -285,190 +281,168 @@ const PROJECT_TOOLS = [
       };
     },
   },
- {
- name: "cyberboss_activity_add",
-    description: "Add a current activity that the user intends to do but has not confirmed starting. Use this when the user mentions something they are about to do and the intention should not be lost. The activity starts in state=intended; promote it to a reminder when it becomes stale, or mark it active when the user confirms they have begun.",
-    shortHint: "Add an intended activity.",
-    topics: ["activity", "reminder"],
-   inputSchema: {
-     type: "object",
-     required: ["title"],
-     properties: {
-        title: { type: "string", description: "Short action title such as '去洗碗', '收桌面', or '吃葡萄糖酸锌'" },
-        note: { type: "string", description: "Optional context or detail about the activity." },
-        checkBackMinutes: { type: "integer", description: "Optional minutes after which an intended activity is considered stale. Defaults to 30." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args }) {
-      const result = services.activity.add(args);
-     return {
-        text: `Activity added: ${result.title}`,
-       data: result,
-     };
-   },
- },
- {
-    name: "cyberboss_activity_list",
-    description: "List current open activities (intended and active). Use this to check what the user is currently doing or has said they will do. Pass includeClosed=true to also see done/dropped activities.",
-    shortHint: "List current activities.",
-    topics: ["activity"],
-   inputSchema: {
-     type: "object",
-     properties: {
-        state: { type: "string", description: "Optional filter: intended, active, done, or dropped." },
-        includeClosed: { type: "boolean", description: "Whether to include done/dropped activities. Defaults to false." },
-        limit: { type: "integer", description: "Optional maximum item count. Defaults to 20." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args }) {
-      const result = services.activity.list(args);
-     return {
-        text: `Activities loaded: ${result.count}.`,
-       data: result,
-     };
-   },
- },
- {
-    name: "cyberboss_activity_start",
-    description: "Mark an activity as actively in progress (state=active). Use this when the user confirms they have actually begun the action, not merely intended it. This is the key distinction between going to do and doing.",
-    shortHint: "Mark an activity as started.",
-    topics: ["activity"],
-   inputSchema: {
-     type: "object",
-     required: ["id"],
-     properties: {
-        id: { type: "string", description: "Activity id." },
-        note: { type: "string", description: "Optional context about how it started." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args }) {
-      const result = services.activity.start(args);
-     return {
-        text: `Activity started: ${result.title}`,
-        data: result,
-     };
-   },
- },
- {
-    name: "cyberboss_activity_complete",
-    description: "Mark an activity as done (state=done). Use this when the user confirms the action is completed. This closes the activity loop.",
-    shortHint: "Mark an activity as done.",
-    topics: ["activity"],
-   inputSchema: {
-     type: "object",
-     required: ["id"],
-     properties: {
-        id: { type: "string", description: "Activity id." },
-        note: { type: "string", description: "Optional closure notes." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args }) {
-      const result = services.activity.complete(args);
-     return {
-        text: `Activity completed: ${result.title}`,
-       data: result,
-     };
-  },
-},
- {
-    name: "cyberboss_activity_drop",
-    description: "Mark an activity as dropped (state=dropped). Use this when the user explicitly says they will not do it, it is no longer relevant, or the intention has clearly lapsed without action.",
-    shortHint: "Mark an activity as dropped.",
-    topics: ["activity"],
+  {
+    name: "cyberboss_title_pool_add",
+    description: "Add one short action title to the lightweight title pool. Use this when the user mentions something they intend to do and it should not be lost, but a time-based reminder is not yet the right move.",
+    shortHint: "Add a short action title to title pool.",
+    topics: ["pool", "reminder"],
     inputSchema: {
       type: "object",
-      required: ["id"],
+      required: ["title"],
       properties: {
-        id: { type: "string", description: "Activity id." },
-        note: { type: "string", description: "Optional reason for dropping." },
+        title: { type: "string", description: "Short action title such as 鍘绘礂婢? 鏀惰。鏈? or 鍚冪敇姘ㄩ吀闀?" },
       },
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.activity.drop(args);
+      const result = services.titlePool.add(args);
       return {
-        text: `Activity dropped: ${result.title}`,
+        text: `Title pool item stored: ${result.title}`,
         data: result,
       };
     },
   },
   {
-   name: "cyberboss_activity_promote_to_reminder",
-    description: "Promote one activity into a reminder, then drop the activity. Use this when an intended activity has become stale or when the user needs a time-based check-back. The reminder text defaults to the activity title.",
-    shortHint: "Promote an activity to reminder.",
-    topics: ["activity", "reminder"],
-   inputSchema: {
-     type: "object",
-     required: ["id"],
-     properties: {
-        id: { type: "string", description: "Activity id." },
-       delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires." },
-       dueAt: { type: "string", description: "Absolute time such as 2026-04-07T21:30+08:00." },
-       userId: { type: "string", description: "Optional explicit WeChat user id." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args, context }) {
-      const item = services.activity.drop({ id: args.id, note: "promoted to reminder" });
-     try {
-       const reminder = await services.reminder.create({
-         text: item.title,
-         delayMinutes: args.delayMinutes,
-         dueAt: args.dueAt,
-         userId: args.userId,
-       }, context);
+    name: "cyberboss_title_pool_list",
+    description: "List the lightweight title pool. Read this when checking short current-action titles the model should keep in view without over-structuring them.",
+    shortHint: "List title pool items.",
+    topics: ["pool", "reminder"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Optional maximum item count. Defaults to 20." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.titlePool.list(args);
       return {
-        text: `Activity promoted to reminder: ${item.title}`,
-        data: {
-          item,
-          reminder,
-        },
+        text: `Title pool items loaded: ${result.count}.`,
+        data: result,
       };
-    } catch (error) {
-      services.activity.add({ title: item.title, note: "restored after failed reminder promotion" });
-      throw error;
-    }
+    },
   },
-},
- {
-   name: "cyberboss_activity_promote_to_memory",
-    description: "Promote one activity into a memory (type wishseed or concern), then drop the activity. Use this when an activity reveals a pattern or durable fact worth preserving across days.",
-    shortHint: "Promote an activity to memory.",
-    topics: ["activity", "memory"],
-   inputSchema: {
-     type: "object",
-     required: ["id"],
-     properties: {
-        id: { type: "string", description: "Activity id." },
-       kind: { type: "string", description: "wishseed or concern. Defaults to wishseed." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args }) {
-    const item = services.activity.drop({ id: args.id, note: "promoted to memory" });
-    try {
-       const memory = await services.agentMemory.remember({
-         type: normalizeText(args.kind) || "wishseed",
-         subject: item.title,
-         content: item.title,
+  {
+    name: "cyberboss_title_pool_review",
+    description: "Review current title-pool items during pulse or quiet reflection. Use this before deciding whether one short action title should stay, be removed, or be promoted into a reminder.",
+    shortHint: "Review title-pool items for pulse follow-up.",
+    topics: ["pool", "pulse", "reminder"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Optional maximum item count. Defaults to 8." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.titlePool.list({
+        limit: Number.isInteger(args.limit) ? args.limit : 8,
       });
       return {
-        text: `Activity promoted to memory: ${item.title}`,
+        text: result.count
+          ? `Title pool review loaded: ${result.count}.`
+          : "Title pool review loaded: empty.",
         data: {
-          item,
-           memory,
+          ...result,
+          guidance: "Use these short titles to decide whether to stay silent, follow up, remove a finished item, or promote one item to reminder.",
         },
+      };
+    },
+  },
+  {
+    name: "cyberboss_title_pool_remove",
+    description: "Remove one title pool item by id after it is done, no longer relevant, or has been promoted elsewhere.",
+    shortHint: "Remove one title pool item.",
+    topics: ["pool"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string", description: "Title pool item id." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.titlePool.remove(args);
+      return {
+        text: `Title pool item removed: ${result.title}`,
+        data: result,
+      };
+    },
+  },
+  {
+    name: "cyberboss_title_pool_promote_to_reminder",
+    description: "Promote one title pool item into a reminder, then remove it from the title pool. Use this when a lightweight current-action title becomes a real future follow-up obligation.",
+    shortHint: "Promote a title pool item to reminder.",
+    topics: ["pool", "reminder"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string", description: "Title pool item id." },
+        delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires." },
+        dueAt: { type: "string", description: "Absolute time such as 2026-04-07T21:30+08:00." },
+        userId: { type: "string", description: "Optional explicit WeChat user id." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args, context }) {
+      const item = services.titlePool.remove({ id: args.id });
+      try {
+        const reminder = await services.reminder.create({
+          text: item.title,
+          delayMinutes: args.delayMinutes,
+          dueAt: args.dueAt,
+          userId: args.userId,
+        }, context);
+       return {
+         text: `Title pool item promoted to reminder: ${item.title}`,
+         data: {
+           item,
+           reminder,
+         },
        };
      } catch (error) {
-      services.activity.add({ title: item.title, note: "restored after failed memory promotion" });
-      throw error;
+       services.titlePool.add({ title: item.title });
+       throw error;
      }
    },
  },
+  {
+    name: "cyberboss_title_pool_promote_to_memory",
+    description: "Promote one title pool item into a memory (type wishseed or concern), then remove it from the title pool. Use this when a lightweight current-action title turns out to be future-useful material worth preserving across turns.",
+    shortHint: "Promote a title pool item to memory.",
+    topics: ["pool", "memory"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string", description: "Title pool item id." },
+        kind: { type: "string", description: "wishseed or concern. Defaults to wishseed." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+     const item = services.titlePool.remove({ id: args.id });
+     try {
+        const memory = await services.agentMemory.remember({
+          type: normalizeText(args.kind) || "wishseed",
+          subject: item.title,
+          content: item.title,
+       });
+       return {
+          text: `Title pool item promoted to memory: ${item.title}`,
+         data: {
+           item,
+            memory,
+         },
+        };
+      } catch (error) {
+        services.titlePool.add({ title: item.title });
+        throw error;
+      }
+    },
+  },
   {
     name: "cyberboss_memory_remember",
     description: "Store a long-term structured memory that should influence future judgment. Do not use this for diary-like logs or tiny one-off details.",
@@ -900,7 +874,7 @@ const PROJECT_TOOLS = [
       type: "object",
       required: ["tag"],
       properties: {
-        tag: { type: "string", description: "Sticker tag such as 可爱, 无语, 闭嘴, 感动, or OK." },
+        tag: { type: "string", description: "Sticker tag such as 鍙埍, 鏃犺, 韬哄钩, 鎰熷姩, or OK." },
         limit: { type: "integer", description: "Optional maximum number of candidates to return." },
       },
       additionalProperties: false,
@@ -1306,24 +1280,22 @@ function buildPulseReviewSummary({
   habitSuggestion,
   obsidian,
   memories,
- activities,
+ titlePool,
 }) {
   const incompleteHabits = Array.isArray(habitStatus?.habits)
     ? habitStatus.habits.filter((item) => item?.dailyState === "incomplete")
     : [];
- const openActivities = Array.isArray(activities?.activities) ? activities.activities : [];
- const staleActivities = Array.isArray(activities?.stale?.activities) ? activities.stale.activities : [];
+ const openTitlePoolItems = Array.isArray(titlePool?.items) ? titlePool.items : [];
  const durableMemories = Array.isArray(memories?.memories) ? memories.memories : [];
 
   const currentContextSummary = {
     turnIntent,
     context: normalizeText(context),
     userState: normalizeText(userState),
-   incompleteHabitCount: incompleteHabits.length,
-   openActivityCount: openActivities.length,
-   staleActivityCount: staleActivities.length,
+    incompleteHabitCount: incompleteHabits.length,
+   titlePoolCount: openTitlePoolItems.length,
    memoryCount: durableMemories.length,
-   obsidianSource: normalizeText(obsidian?.source) || "none",
+    obsidianSource: normalizeText(obsidian?.source) || "none",
     obsidianFound: detectObsidianSignal(obsidian),
   };
 
@@ -1343,8 +1315,8 @@ function buildPulseReviewSummary({
   if (!reasons.length && hasInterestingObsidianSignal) {
     reasons.push("Obsidian contains a potentially relevant signal, but it may only justify private review");
   }
- if (!reasons.length && staleActivities.length) {
-   reasons.push("there are stale intended activities worth a check-back");
+ if (!reasons.length && openTitlePoolItems.length) {
+   reasons.push("there are short current-action titles worth a quick review before they disappear");
  }
  if (!reasons.length) {
     reasons.push("no strong interruption-worthy signal was found");
@@ -1375,8 +1347,8 @@ function buildPulseReviewSummary({
   if (followupOpportunity.shouldSetReminder && !shouldContactForReminder) {
     recommendedPrivateActions.push("set a reminder for today's incomplete habit instead of letting it disappear");
   }
- if (staleActivities.length) {
-   recommendedPrivateActions.push("promote stale intended activities to reminders or mark them done/dropped");
+ if (openTitlePoolItems.length) {
+   recommendedPrivateActions.push("review whether one short title-pool item should be removed, quietly followed up, or promoted to reminder");
  }
  if (!recommendedPrivateActions.length) {
     recommendedPrivateActions.push("stay silent and wait for a better trigger");

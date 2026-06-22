@@ -105,10 +105,10 @@ async function maybeQueueFollowupAudit(app, audit) {
     .filter((reminder) => reminder.accountId === audit.accountId && reminder.senderId === audit.senderId);
   const baselineIds = new Set(Array.isArray(audit.baselineReminderIds) ? audit.baselineReminderIds : []);
   const hasNewReminder = reminders.some((reminder) => !baselineIds.has(reminder.id));
-  const titlePoolItems = app.projectServices?.titlePool?.list?.({ limit: 50 })?.items || [];
-  const baselineTitlePoolIds = new Set(Array.isArray(audit.baselineTitlePoolIds) ? audit.baselineTitlePoolIds : []);
-  const hasNewTitlePoolItem = titlePoolItems.some((item) => !baselineTitlePoolIds.has(item.id));
-  if (hasNewReminder || hasNewTitlePoolItem) {
+  const activityItems = app.projectServices?.activity?.list?.({ includeClosed: true, limit: 50 })?.activities || [];
+  const baselineActivityIds = new Set(Array.isArray(audit.baselineActivityIds) ? audit.baselineActivityIds : []);
+  const hasNewActivity = activityItems.some((item) => !baselineActivityIds.has(item.id));
+  if (hasNewReminder || hasNewActivity) {
     return false;
   }
 
@@ -117,12 +117,12 @@ async function maybeQueueFollowupAudit(app, audit) {
     "The user described a likely future action or something that may need follow-up.",
     `Original user text: ${audit.originalText}`,
     "No new reminder or title-pool item was detected during that turn.",
-    "Re-check whether this open loop should become a short reminder now or at least be captured in the title pool.",
+    "Re-check whether this open loop should become a short reminder now or at least be captured as an activity.",
     "Do not leave the loop in a vague remembered state.",
     "For ADHD support, do not assume that saying it means doing it, and do not assume the user will remember unaided.",
     "If the action is about to happen soon, may slip, or would benefit from a quick check-back, prefer cyberboss_followup_decide or cyberboss_reminder_create with a short delay.",
-    "If the user only mentioned a short intended action and the timing is still fuzzy, prefer cyberboss_title_pool_add so the intention is not lost.",
-    "Only skip both reminder and title pool if the matter was already explicitly resolved or another mechanism clearly captured it.",
+    "If the user only mentioned a short intended action and the timing is still fuzzy, prefer cyberboss_activity_add so the intention is not lost.",
+    "Only skip both reminder and activity if the matter was already explicitly resolved or another mechanism clearly captured it.",
     "Otherwise write one of them now.",
   ].join("\n");
 
@@ -239,6 +239,7 @@ function captureSideEffectSnapshot(config) {
  const trackedPaths = [
    config?.reminderQueueFile,
    config?.agentMemoryFile,
+   config?.activityFile,
     config?.habitDefinitionsFile,
     config?.habitEventsFile,
     config?.habitStateFile,

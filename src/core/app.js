@@ -893,18 +893,18 @@ class CyberbossApp {
       .listAll()
       .filter((reminder) => reminder.accountId === prepared.accountId && reminder.senderId === prepared.senderId)
       .map((reminder) => reminder.id);
-    const baselineTitlePoolIds = this.projectServices?.titlePool?.list?.({ limit: 50 })?.items?.map((item) => item.id) || [];
-    this.pendingFollowupAuditByRunKey.set(buildRunKey(threadId, turnId), {
-      threadId,
-      turnId,
-      bindingKey,
-      workspaceRoot,
-      accountId: prepared.accountId,
-      senderId: prepared.senderId,
-      originalText,
-      baselineReminderIds,
-      baselineTitlePoolIds,
-    });
+   const baselineActivityIds = this.projectServices?.activity?.list?.({ includeClosed: true, limit: 50 })?.activities?.map((item) => item.id) || [];
+  this.pendingFollowupAuditByRunKey.set(buildRunKey(threadId, turnId), {
+    threadId,
+    turnId,
+    bindingKey,
+    workspaceRoot,
+    accountId: prepared.accountId,
+    senderId: prepared.senderId,
+    originalText,
+    baselineReminderIds,
+    baselineActivityIds,
+  });
   }
 
   trackPendingHabitAudit({ turn, prepared, bindingKey, workspaceRoot }) {
@@ -1693,6 +1693,7 @@ function captureSideEffectSnapshot(config) {
  const trackedPaths = [
    config?.reminderQueueFile,
    config?.agentMemoryFile,
+   config?.activityFile,
     config?.habitDefinitionsFile,
     config?.habitEventsFile,
     config?.habitStateFile,

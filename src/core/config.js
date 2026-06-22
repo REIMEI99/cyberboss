@@ -28,6 +28,7 @@ function readConfig() {
     accountsDir: path.join(stateDir, "accounts"),
     reminderQueueFile: path.join(stateDir, "reminder-queue.json"),
     titlePoolFile: path.join(stateDir, "title-pool.json"),
+    activityFile: path.join(stateDir, "activity.json"),
     systemMessageQueueFile: path.join(stateDir, "system-message-queue.json"),
     deferredSystemReplyQueueFile: path.join(stateDir, "deferred-system-replies.json"),
     checkinConfigFile: path.join(stateDir, "checkin-config.json"),
