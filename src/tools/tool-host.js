@@ -603,6 +603,27 @@ const PROJECT_TOOLS = [
       };
     },
   },
+  {
+    name: "cyberboss_memory_delete",
+    description: "Permanently delete a structured memory from storage. This is irreversible and removes the record entirely, unlike forget (archive) or complete (mark done). Use only when the memory is wrong, duplicated, or should never have existed.",
+    shortHint: "Permanently delete a memory.",
+    topics: ["memory"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
+        id: { type: "string", description: "Memory id to permanently delete." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.agentMemory.delete(args);
+      return {
+        text: `Memory deleted: ${result.subject}`,
+        data: result,
+      };
+    },
+  },
  {
    name: "cyberboss_diary_append",
     description: "Append a diary entry into Cyberboss local diary storage.",
