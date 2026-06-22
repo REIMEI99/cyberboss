@@ -303,7 +303,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_activity_add",
-    description: "Add an open activity for something the user said they will do or are doing. One activity can hold multiple items (a work sequence). A check-back reminder is automatically created and 1:1 bound to this activity. The reminder fires after ~10 minutes and cycles until the activity is closed. For long-term wishes with no timeline, use memory type=wishseed instead.",
+    description: "Add an open activity for something the user said they will do or are doing. One activity can hold multiple items (a work sequence). A check-back reminder is automatically created and 1:1 bound to this activity. Use checkBackMinutes to set when the first check fires and followupDelayMinutes to set the repeat interval. For near-term actions (user is about to do it), use short values like 10-15 min. For something later today or tomorrow, use longer values like 60-240 min. For long-term wishes with no timeline, use memory type=wishseed instead.",
     shortHint: "Add an open activity with auto check-back reminder.",
     topics: ["activity", "reminder"],
     inputSchema: {
@@ -312,7 +312,8 @@ const PROJECT_TOOLS = [
       properties: {
         title: { type: "string", description: "Short title for the activity or work sequence." },
         items: { type: "array", items: { type: "string" }, description: "Optional list of specific items in this work sequence. Omit if the title alone is sufficient." },
-        checkBackMinutes: { type: "integer", description: "Minutes before the check-back reminder fires. Defaults to 10." },
+        checkBackMinutes: { type: "integer", description: "Minutes before the first check-back. Defaults to 10 for near-term actions; set higher for later activities." },
+        followupDelayMinutes: { type: "integer", description: "Minutes between repeated check-backs after the first fire. Defaults to checkBackMinutes if omitted. Set higher for non-urgent activities." },
       },
       additionalProperties: false,
     },
@@ -320,9 +321,11 @@ const PROJECT_TOOLS = [
       const activity = services.activity.add({ title: args.title, items: args.items, reminderId: "" });
       let reminderId = "";
       try {
+        const checkBackMinutes = Number.isInteger(args.checkBackMinutes) && args.checkBackMinutes > 0 ? args.checkBackMinutes : 10;
         const reminder = await services.reminder.create({
-          text: "Activity check-back. Call cyberboss_activity_list to see all open activities. For each, complete it if the user confirmed doing it, or drop it if the user said they won't. If still pending, leave it open. Do not assume completion without confirmation.",
-          delayMinutes: Number.isInteger(args.checkBackMinutes) && args.checkBackMinutes > 0 ? args.checkBackMinutes : 10,
+          text: `Activity check-back: ${activity.title}. Call cyberboss_activity_list to see all open activities. For each, complete it if the user confirmed doing it, or drop it if the user said they won't. If still pending, leave it open. Do not assume completion without confirmation.`,
+          delayMinutes: checkBackMinutes,
+          followupDelayMinutes: Number.isInteger(args.followupDelayMinutes) && args.followupDelayMinutes > 0 ? args.followupDelayMinutes : undefined,
           activityId: activity.id,
         }, context);
         reminderId = reminder.id;

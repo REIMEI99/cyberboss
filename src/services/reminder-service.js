@@ -262,7 +262,7 @@ function clampFollowupDelayMinutes(value) {
   if (!Number.isFinite(parsed) || parsed <= 0) {
     return 15;
   }
-  return Math.max(5, Math.min(parsed, 180));
+  return Math.max(5, Math.min(parsed, 1440));
 }
 
 module.exports = {
