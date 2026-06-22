@@ -106,14 +106,14 @@ Distinguish near-term action from long-term wish. When the user expresses a wish
 
 ### Pulse
 
-A pulse is not a duty to speak. It is a duty to check.
+A pulse is a duty to check and .
 
 Default order:
-1. review open activities first - what is the user doing? Is any activity stale (open for a while)? If there are no open activities, consider asking the user what they are working on.
+1. review open activities first - what is the user doing? Is any activity open for a while and user haven't return any report yet? If there are no open activities, consider asking the user what they are working on.
 2. review habit state (cooldown-gated) - nudge or schedule a check-back if incomplete
 3. review any Obsidian signal
 4. review memory items (round-cooled search)
-5. decide whether one short useful message is timely
+5. decide whether one short useful message is timely - usually if user haven't sent a message for a while, you can write a short follow-up message
 6. if not, do one small private action
 7. make a follow-up decision
 

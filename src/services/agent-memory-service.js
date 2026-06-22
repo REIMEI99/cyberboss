@@ -122,7 +122,7 @@ class AgentMemoryService {
     this.state.memories.push(memory);
     this.state.memories.sort(compareMemories);
     this.save();
-    return memory;
+    return stripEmbedding(memory);
   }
 
   async complete({ id = "", notes = "" } = {}) {
@@ -146,7 +146,7 @@ class AgentMemoryService {
     this.state.memories[index] = next;
     this.state.memories.sort(compareMemories);
     this.save();
-    return next;
+    return stripEmbedding(next);
   }
 
   list({ type = "", subject = "", includeArchived = false, limit = 20 } = {}) {
@@ -164,7 +164,7 @@ class AgentMemoryService {
     return {
       filePath: this.filePath,
       count: memories.length,
-      memories,
+      memories: stripEmbeddingFromMemories(memories),
     };
   }
 
@@ -180,7 +180,7 @@ class AgentMemoryService {
       if (Array.isArray(queryEmbedding) && queryEmbedding.length) {
         const matched = rankByEmbedding(candidates, queryEmbedding, { limit });
         if (matched.length) {
-          return { filePath: this.filePath, query: normalizeText(query), count: matched.length, memories: matched };
+          return { filePath: this.filePath, query: normalizeText(query), count: matched.length, memories: stripEmbeddingFromMemories(matched) };
         }
       }
     }
@@ -199,7 +199,7 @@ class AgentMemoryService {
       filePath: this.filePath,
       query: normalizeText(query),
       count: memories.length,
-      memories,
+      memories: stripEmbeddingFromMemories(memories),
     };
   }
 
@@ -235,7 +235,7 @@ class AgentMemoryService {
     this.state.memories[index] = next;
     this.state.memories.sort(compareMemories);
     this.save();
-    return next;
+    return stripEmbedding(next);
   }
 
   touch({ id = "" } = {}) {
@@ -298,7 +298,7 @@ class AgentMemoryService {
     this.state.memories[index] = next;
     this.state.memories.sort(compareMemories);
     this.save();
-    return next;
+    return stripEmbedding(next);
   }
 
   async reindex() {
@@ -562,4 +562,15 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function stripEmbedding(memory) {
+  if (!memory || typeof memory !== "object") {
+    return memory;
+  }
+  const { embedding, ...rest } = memory;
+  return rest;
+}
+
+function stripEmbeddingFromMemories(memories) {
+  return Array.isArray(memories) ? memories.map(stripEmbedding) : memories;
+}
 module.exports = { AgentMemoryService, COMPLETABLE_TYPES, MEMORY_TYPES };
