@@ -99,6 +99,26 @@ class ReminderQueueStore {
     this.save();
     return removed;
   }
+
+  bindActivity({ id = "", activityId = "" } = {}) {
+    this.load();
+    const normalizedId = typeof id === "string" ? id.trim() : "";
+    const normalizedActivityId = typeof activityId === "string" ? activityId.trim() : "";
+    if (!normalizedId) {
+      throw new Error("reminder bindActivity requires id");
+    }
+    const index = this.state.reminders.findIndex((reminder) => reminder.id === normalizedId);
+    if (index < 0) {
+      throw new Error(`reminder not found: ${normalizedId}`);
+    }
+    this.state.reminders[index] = normalizeReminder({
+      ...this.state.reminders[index],
+      activityId: normalizedActivityId,
+    });
+    this.state.reminders.sort((left, right) => left.dueAtMs - right.dueAtMs);
+    this.save();
+    return { ...this.state.reminders[index] };
+  }
 }
 
 function normalizeReminder(reminder) {
@@ -112,6 +132,7 @@ function normalizeReminder(reminder) {
   const text = typeof reminder.text === "string" ? reminder.text.trim() : "";
   const dueAtMs = Number(reminder.dueAtMs);
   const createdAt = typeof reminder.createdAt === "string" ? reminder.createdAt.trim() : "";
+  const activityId = typeof reminder.activityId === "string" ? reminder.activityId.trim() : "";
   const followupDelayMinutes = Number.parseInt(String(reminder.followupDelayMinutes || ""), 10);
   const lastTriggeredAt = typeof reminder.lastTriggeredAt === "string" ? reminder.lastTriggeredAt.trim() : "";
   const triggerCount = Number.parseInt(String(reminder.triggerCount || ""), 10);
@@ -126,6 +147,7 @@ function normalizeReminder(reminder) {
     text,
     dueAtMs,
     createdAt: createdAt || new Date().toISOString(),
+    activityId,
     followupDelayMinutes: Number.isFinite(followupDelayMinutes) && followupDelayMinutes > 0 ? followupDelayMinutes : 15,
     lastTriggeredAt: lastTriggeredAt || "",
     triggerCount: Number.isFinite(triggerCount) && triggerCount > 0 ? triggerCount : 0,

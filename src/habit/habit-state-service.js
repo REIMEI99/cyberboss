@@ -169,7 +169,7 @@ class HabitStateService {
       .filter((event) => DAILY_STATE_EVENT_TYPES.has(event.type))
       .filter((event) => dateKeyFor(event.createdAt, this.timezone, this.dayResetHour) === date);
     const signature = state.habits
-      .map((item) => `${item?.habit?.id || ""}:${item?.dailyState || "none"}`)
+      .map((item) => `${item?.habit?.id || ""}:${item?.dailyState || "incomplete"}`)
       .sort()
       .join("|");
     return {
@@ -420,7 +420,6 @@ function buildHabitHistoryRow({ habit, dates, events, timezone, dayResetHour }) 
     done: 0,
     incomplete: 0,
     abandoned: 0,
-    none: 0,
     trackedDays: 0,
     completionRateDenominator: 0,
   });
@@ -435,7 +434,6 @@ function buildHabitHistoryRow({ habit, dates, events, timezone, dayResetHour }) 
       doneDays: summary.done,
       incompleteDays: summary.incomplete,
       abandonedDays: summary.abandoned,
-      emptyDays: summary.none,
       trackedDays: summary.trackedDays,
       completionRate,
     },
@@ -453,14 +451,14 @@ function normalizeDailyState(type) {
     case "incomplete":
       return "incomplete";
     case "":
-      return "none";
+      return "incomplete";
     default:
       return "incomplete";
   }
 }
 
 function stateScoreFor(state, hasEvents) {
-  if (!hasEvents || state === "none") {
+  if (!hasEvents) {
     return null;
   }
   if (state === "done") {

@@ -60,8 +60,8 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse" } =
       ? "This is a due reminder. Act on it now. Do not treat it as optional or as implicit completion."
       : "This is a pulse-like trigger. Review context, decide whether to contact the user, and decide follow-up.",
     "Default first step: use cyberboss_pulse_review unless the trigger already gives you enough context.",
-    "Read the situation in this order: context, today's habit state, Obsidian signal, seed-like carry-over material, whether user contact is useful now, and whether later follow-up should become a reminder.",
-    "Reminder is the default follow-up substrate. If an open loop may matter later, either create a reminder, store a short action in the title pool, or conclude clearly that neither is needed.",
+    "Activity is the soul of this assistant. Read the situation in this order: current open activities (what is the user doing or about to do?), today's habit state, any Obsidian signal, memory items, whether user contact is useful now, and whether a follow-up is needed.",
+    "For near-term user actions, capture them as open activities with cyberboss_activity_add; the activity auto-binds a check-back reminder. Use a standalone reminder only for far-future non-action follow-ups.",
     effectiveKind === "reminder"
       ? "Due reminders stay active until explicitly cleared. Do not assume the user already did it just because the reminder fired. If recent context clearly shows completion, list active reminders and clear the matching one."
       : "Do not assume that the user will remember or act just because they said it out loud.",

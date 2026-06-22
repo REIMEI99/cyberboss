@@ -294,38 +294,60 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_activity_add",
-    description: "Add an open activity for something the user said they will do or are doing. A check-back reminder is automatically created and bound to the activity. If other open activities already share a reminder, the new activity joins it. The reminder fires after ~10 minutes and cycles until all open activities are closed. For long-term wishes with no timeline, use memory type=wishseed instead.",
+    description: "Add an open activity for something the user said they will do or are doing. One activity can hold multiple items (a work sequence). A check-back reminder is automatically created and 1:1 bound to this activity. The reminder fires after ~10 minutes and cycles until the activity is closed. For long-term wishes with no timeline, use memory type=wishseed instead.",
     shortHint: "Add an open activity with auto check-back reminder.",
     topics: ["activity", "reminder"],
     inputSchema: {
       type: "object",
       required: ["title"],
       properties: {
-        title: { type: "string", description: "Short action title." },
-        checkBackMinutes: { type: "integer", description: "Minutes before the check-back reminder fires. Only applies when creating a new reminder. Defaults to 10." },
+        title: { type: "string", description: "Short title for the activity or work sequence." },
+        items: { type: "array", items: { type: "string" }, description: "Optional list of specific items in this work sequence. Omit if the title alone is sufficient." },
+        checkBackMinutes: { type: "integer", description: "Minutes before the check-back reminder fires. Defaults to 10." },
       },
       additionalProperties: false,
     },
     async handler({ services, args, context }) {
-      const openList = services.activity.list({ limit: 50 });
-      const existingReminderId = openList.activities.find((a) => a.reminderId)?.reminderId || "";
-      let reminderId = existingReminderId;
-      if (!reminderId) {
-        try {
-          const reminder = await services.reminder.create({
-            text: "Activity check-back. Call cyberboss_activity_list to see all open activities. For each, complete it if the user confirmed doing it, or drop it if the user said they won't. If still pending, leave it open. Do not assume completion without confirmation.",
-            delayMinutes: Number.isInteger(args.checkBackMinutes) && args.checkBackMinutes > 0 ? args.checkBackMinutes : 10,
-          }, context);
-          reminderId = reminder.id;
-        } catch (error) {
-          console.warn(`[cyberboss] activity reminder creation failed: ${error?.message || error}`);
-          reminderId = "";
+      const activity = services.activity.add({ title: args.title, items: args.items, reminderId: "" });
+      let reminderId = "";
+      try {
+        const reminder = await services.reminder.create({
+          text: "Activity check-back. Call cyberboss_activity_list to see all open activities. For each, complete it if the user confirmed doing it, or drop it if the user said they won't. If still pending, leave it open. Do not assume completion without confirmation.",
+          delayMinutes: Number.isInteger(args.checkBackMinutes) && args.checkBackMinutes > 0 ? args.checkBackMinutes : 10,
+          activityId: activity.id,
+        }, context);
+        reminderId = reminder.id;
+        if (reminderId) {
+          services.activity.bindReminder({ id: activity.id, reminderId });
         }
+      } catch (error) {
+        console.warn(`[cyberboss] activity reminder creation failed: ${error?.message || error}`);
       }
-      const result = services.activity.add({ title: args.title, reminderId });
       return {
-        text: `Activity added: ${result.title}`,
-        data: { id: result.id, title: result.title, reminderId: result.reminderId, createdAt: result.createdAt },
+        text: `Activity added: ${activity.title}`,
+        data: { id: activity.id, title: activity.title, items: activity.items || [], reminderId, hasReminder: Boolean(reminderId), createdAt: activity.createdAt },
+      };
+    },
+  },
+  {
+    name: "cyberboss_activity_add_item",
+    description: "Append an item to an existing open activity. Use when the user mentions another task that belongs to the same work sequence as an existing open activity.",
+    shortHint: "Append an item to an activity.",
+    topics: ["activity"],
+    inputSchema: {
+      type: "object",
+      required: ["id", "text"],
+      properties: {
+        id: { type: "string", description: "Activity id." },
+        text: { type: "string", description: "The item to append." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.activity.addItem({ id: args.id, text: args.text });
+      return {
+        text: `Item added to activity: ${result.title}`,
+        data: { id: result.id, title: result.title, items: result.items || [], itemCount: (result.items || []).length },
       };
     },
   },
@@ -347,14 +369,14 @@ const PROJECT_TOOLS = [
         text: `Activities loaded: ${result.count}.`,
         data: {
           count: result.count,
-          activities: result.activities.map((a) => ({ id: a.id, title: a.title, createdAt: a.createdAt })),
+          activities: result.activities.map((a) => ({ id: a.id, title: a.title, items: a.items || [], hasReminder: Boolean(a.reminderId), createdAt: a.createdAt })),
         },
       };
     },
   },
   {
     name: "cyberboss_activity_complete",
-    description: "Mark an open activity as done. Use this when the user confirms the action is completed. If no open activities remain, the linked check-back reminder is cleared automatically.",
+    description: "Mark an open activity as done. Use this when the user confirms the action is completed. The bound check-back reminder is cleared automatically.",
     shortHint: "Mark an activity as done.",
     topics: ["activity"],
     inputSchema: {
@@ -367,18 +389,18 @@ const PROJECT_TOOLS = [
     },
     async handler({ services, args }) {
       const result = services.activity.complete({ id: args.id });
-      if (result.remainingOpenCount === 0 && result.reminderId) {
+      if (result.reminderId) {
         try { services.reminder.complete({ id: result.reminderId }); } catch {}
       }
       return {
         text: `Activity completed: ${result.title}`,
-        data: { id: result.id, title: result.title, remainingOpenCount: result.remainingOpenCount },
+        data: { id: result.id, title: result.title, items: result.items || [] },
       };
     },
   },
   {
     name: "cyberboss_activity_drop",
-    description: "Drop an open activity — the user won't do it, or it's no longer relevant. The activity is removed immediately. If no open activities remain, the linked check-back reminder is cleared automatically.",
+    description: "Drop an open activity — the user won't do it, or it's no longer relevant. The activity is removed immediately. The bound check-back reminder is cleared automatically.",
     shortHint: "Drop an open activity.",
     topics: ["activity"],
     inputSchema: {
@@ -391,12 +413,12 @@ const PROJECT_TOOLS = [
     },
     async handler({ services, args }) {
       const result = services.activity.drop({ id: args.id });
-      if (result.remainingOpenCount === 0 && result.reminderId) {
+      if (result.reminderId) {
         try { services.reminder.complete({ id: result.reminderId }); } catch {}
       }
       return {
         text: `Activity dropped: ${result.title}`,
-        data: { id: result.id, title: result.title, remainingOpenCount: result.remainingOpenCount },
+        data: { id: result.id, title: result.title, items: result.items || [] },
       };
     },
   },
@@ -422,7 +444,7 @@ const PROJECT_TOOLS = [
           subject: dropped.title,
           content: dropped.title,
         });
-        if (dropped.remainingOpenCount === 0 && dropped.reminderId) {
+        if (dropped.reminderId) {
           try { services.reminder.complete({ id: dropped.reminderId }); } catch {}
         }
         return {
@@ -430,7 +452,7 @@ const PROJECT_TOOLS = [
           data: { id: dropped.id, title: dropped.title, memory },
         };
       } catch (error) {
-        services.activity.add({ title: dropped.title, reminderId: dropped.reminderId });
+        services.activity.add({ title: dropped.title, items: dropped.items, reminderId: dropped.reminderId });
         throw error;
       }
     },
@@ -1633,15 +1655,13 @@ function summarizeHabitStatus(habits) {
     doneCount: 0,
     incompleteCount: 0,
     abandonedCount: 0,
-    noneCount: 0,
     topIncompleteHabits: [],
   };
   for (const item of items) {
-    const state = normalizeText(item?.dailyState) || "none";
+    const state = normalizeText(item?.dailyState) || "incomplete";
     if (state === "done") summary.doneCount += 1;
     else if (state === "incomplete") summary.incompleteCount += 1;
     else if (state === "abandoned") summary.abandonedCount += 1;
-    else summary.noneCount += 1;
   }
   summary.topIncompleteHabits = items
     .filter((item) => normalizeText(item?.dailyState) === "incomplete")

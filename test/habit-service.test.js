@@ -4,16 +4,15 @@ const fs = require("fs");
 const os = require("os");
 const path = require("path");
 
-const { HabitService } = require("../src/services/habit-service");
+const { HabitService } = require("../src/habit/habit-service");
 
 function createService() {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-habit-test-"));
   return new HabitService({
-    config: {
-      habitDefinitionsFile: path.join(stateDir, "habit-definitions.json"),
-      habitEventsFile: path.join(stateDir, "habit-events.jsonl"),
-      habitStateFile: path.join(stateDir, "habit-state.json"),
-    },
+    definitionsFile: path.join(stateDir, "habit-definitions.json"),
+    eventsFile: path.join(stateDir, "habit-events.jsonl"),
+    stateFile: path.join(stateDir, "habit-state.json"),
+    heatmapFile: path.join(stateDir, "habit-heatmap.json"),
   });
 }
 

@@ -30,11 +30,12 @@ class ReminderService {
     text = "",
     textFile = "",
     userId = "",
+    activityId = "",
   } = {}, context = {}) {
     const body = await resolveBodyInput({ text, textFile });
-    if (!body) {
-      throw new Error("Reminder text cannot be empty. Pass text or textFile.");
-    }
+   if (!body) {
+     throw new Error("Reminder text cannot be empty. Pass text or textFile.");
+   }
 
     const dueAtMs = resolveDueAtMs({ delay, delayMinutes, at, dueAt });
     if (!Number.isFinite(dueAtMs) || dueAtMs <= Date.now()) {
@@ -73,6 +74,7 @@ class ReminderService {
         followupDelayMinutes,
       }),
       createdAt: new Date().toISOString(),
+      activityId: typeof activityId === "string" ? activityId.trim() : "",
     });
     return reminder;
   }

@@ -110,7 +110,7 @@ class ActivityService {
     fs.writeFileSync(this.filePath, JSON.stringify(this.state, null, 2));
   }
 
-  add({ title = "", reminderId = "" } = {}) {
+  add({ title = "", items, reminderId = "" } = {}) {
     this.load();
     const normalizedTitle = normalizeText(title);
     if (!normalizedTitle) {
@@ -120,6 +120,7 @@ class ActivityService {
     const activity = {
       id: crypto.randomUUID(),
       title: normalizedTitle,
+      items: normalizeItems(items),
       reminderId: normalizeText(reminderId),
       createdAt: now,
     };
@@ -127,6 +128,43 @@ class ActivityService {
     this.pruneOpen();
     this.save();
     return activity;
+  }
+
+  bindReminder({ id = "", reminderId = "" } = {}) {
+    this.load();
+    const normalizedId = normalizeText(id);
+    if (!normalizedId) {
+      throw new Error("Activity bindReminder requires id.");
+    }
+    const activity = this.state.open.find((a) => a.id === normalizedId);
+    if (!activity) {
+      throw new Error(`Activity not found: ${normalizedId}`);
+    }
+    activity.reminderId = normalizeText(reminderId);
+    this.save();
+    return { ...activity };
+  }
+
+  addItem({ id = "", text = "" } = {}) {
+    this.load();
+    const normalizedId = normalizeText(id);
+    if (!normalizedId) {
+      throw new Error("Activity addItem requires id.");
+    }
+    const activity = this.state.open.find((a) => a.id === normalizedId);
+    if (!activity) {
+      throw new Error(`Activity not found: ${normalizedId}`);
+    }
+    const normalizedText = normalizeText(text);
+    if (!normalizedText) {
+      throw new Error("Activity addItem requires non-empty text.");
+    }
+    if (!Array.isArray(activity.items)) {
+      activity.items = [];
+    }
+    activity.items.push(normalizedText);
+    this.save();
+    return { ...activity };
   }
 
   complete({ id = "" } = {}) {
@@ -217,6 +255,13 @@ class ActivityService {
   }
 }
 
+function normalizeItems(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => (typeof item === "string" ? item.trim() : ""))
+    .filter(Boolean);
+}
+
 function normalizeActivity(value) {
   if (!value || typeof value !== "object") return null;
   const id = normalizeText(value.id);
@@ -225,6 +270,7 @@ function normalizeActivity(value) {
   const result = {
     id,
     title,
+    items: normalizeItems(value.items),
     reminderId: normalizeText(value.reminderId),
     createdAt: normalizeIsoTime(value.createdAt) || new Date().toISOString(),
   };

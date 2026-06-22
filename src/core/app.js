@@ -1632,47 +1632,26 @@ function shouldAuditUserFollowup(text) {
   if (!normalized) {
     return false;
   }
-  const directFutureWords = [
-    "等会",
-    "待会",
-    "一会",
-    "稍后",
-    "晚点",
-    "之后",
-    "回头",
-    "明天",
-    "下次",
-    "今晚",
-    "等下",
-    "到时候",
-    "过会",
-  ];
-  const futureIntentPhrases = [
-    "我要去",
-    "我去",
-    "我准备",
-    "我打算",
-    "我想去",
-    "我想做",
-    "我要做",
-    "我会去",
-    "我会做",
-    "记得",
-    "记一下",
-    "提醒我",
-    "别忘了",
-    "回头提醒",
-    "之后提醒",
-  ];
-  const futureIntentPatterns = [
-    /\b(?:later|soon|afterwards|tomorrow|tonight|next time|eventually)\b/i,
-    /\b(?:i(?:'| a)?m going to|i will|i should|i need to|i plan to|remind me|don't let me forget)\b/i,
-    /(?:我要|我得|我去|我先去|我先做|我准备|我待会|等下我|一会我).{0,20}(?:做|去|拿|买|点|回|发|问|洗|收|看|处理)/u,
-    /(?:记得|提醒我|别忘了|等会提醒|之后提醒)/u,
-  ];
-  return directFutureWords.some((item) => normalized.includes(item))
-    || futureIntentPhrases.some((item) => normalized.includes(item))
-    || futureIntentPatterns.some((pattern) => pattern.test(normalized));
+  // Near-universal audit: skip only pure acknowledgments / noise that cannot
+  // describe an action. The old keyword gate missed too many intentions that
+  // were phrased without explicit future-intent words, so activity tracking
+  // silently lost them. Now nearly every real user message gets a second look.
+  const stripped = normalized.replace(/[\s\p{P}\p{S}]/gu, "");
+  if (!stripped) {
+    return false;
+  }
+  // Repeated interjections (haha, mmm, oh...) carry no action.
+  if (/^(好|嗯|哈|嘿|呵|哦|噢|唉|啊|呀|吧|嗯哼)+$/u.test(stripped)) {
+    return false;
+  }
+  const noiseTokens = new Set([
+    "好的", "好吧", "行", "对", "是的", "收到", "了解", "知道了", "知道啦", "明白",
+    "ok", "okay", "好嘞", "谢谢", "感谢", "辛苦了", "晚安", "早安", "拜拜",
+  ]);
+  if (noiseTokens.has(stripped)) {
+    return false;
+  }
+  return true;
 }
 
 function shouldAuditHabitClosure(text) {

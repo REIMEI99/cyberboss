@@ -99,6 +99,20 @@ async function handleCompletedOrFailedTurn(app, event, failureReplyTarget) {
   }
 }
 
+function buildOpenActivityDigest(app) {
+  const result = app.projectServices?.activity?.list?.({ limit: 20 });
+  const activities = Array.isArray(result?.activities) ? result.activities : [];
+  if (!activities.length) {
+    return "Open activities: (none)";
+  }
+  const lines = activities.map((a) => {
+    const ageMin = Math.max(0, Math.floor((Date.now() - (Date.parse(a.createdAt) || Date.now())) / 60000));
+    const items = Array.isArray(a.items) && a.items.length ? ` [items: ${a.items.join("; ")}]` : "";
+    return `- ${a.title}${items} (open ${ageMin}m)`;
+  });
+  return `Open activities:\n${lines.join("\n")}`;
+}
+
 async function maybeQueueFollowupAudit(app, audit) {
   const reminders = app.reminderQueue
     .listAll()
@@ -112,18 +126,21 @@ async function maybeQueueFollowupAudit(app, audit) {
     return false;
   }
 
+  const openActivityDigest = buildOpenActivityDigest(app);
+
   const text = [
-    "A user-message turn just finished.",
-    "The user described a likely future action or something that may need follow-up.",
+    "A user-message turn just finished, and no new activity or reminder was created during it.",
     `Original user text: ${audit.originalText}`,
-    "No new reminder or title-pool item was detected during that turn.",
-    "Re-check whether this open loop should become a short reminder now or at least be captured as an activity.",
-    "Do not leave the loop in a vague remembered state.",
-    "For ADHD support, do not assume that saying it means doing it, and do not assume the user will remember unaided.",
-    "If the action is about to happen soon, may slip, or would benefit from a quick check-back, prefer cyberboss_followup_decide or cyberboss_reminder_create with a short delay.",
-    "If the user only mentioned a short intended action and the timing is still fuzzy, prefer cyberboss_activity_add so the intention is not lost.",
-    "Only skip both reminder and activity if the matter was already explicitly resolved or another mechanism clearly captured it.",
-    "Otherwise write one of them now.",
+    "",
+    openActivityDigest,
+    "",
+    "Re-evaluate whether this user message describes something the user will do or is doing right now.",
+    "Hard rule: saying they will do something does NOT mean they already did it. 'Will do / about to do / going to' is an OPEN activity, not a completed one. Only mark done when the user confirms the action is finished.",
+    "If the user described a near-term action (will do or doing), add it now with cyberboss_activity_add so the intention is not lost. The activity auto-binds a check-back reminder.",
+    "If several tasks form one work sequence, pass them as items, or use cyberboss_activity_add_item on an existing open activity rather than spawning a separate activity.",
+    "If the user expressed a long-term wish with no near-term plan, store it as memory type=wishseed instead of an activity.",
+    "If the matter was already explicitly resolved in this turn, or another mechanism clearly captured it, return silent.",
+    "Otherwise add the activity now; do not leave the loop in a vague remembered state.",
   ].join("\n");
 
   app.systemMessageQueue.enqueue({
@@ -261,4 +278,6 @@ function readMtimeMs(filePath) {
 
 module.exports = {
   createAppRuntimeEvents,
+  maybeQueueFollowupAudit,
+  buildOpenActivityDigest,
 };

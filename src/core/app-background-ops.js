@@ -69,6 +69,7 @@ async function flushDueReminders(app, account) {
         id: reminder.id,
         dueAtMs: Date.now() + resolveReminderFollowupDelayMs(reminder),
       });
+      reconcileOrphanReminder(app, reminder);
       app.systemMessageQueue.enqueue({
         id: `reminder:${reminder.id}`,
         accountId: reminder.accountId,
@@ -87,6 +88,35 @@ async function flushDueReminders(app, account) {
       } catch {}
     }
   }
+}
+
+// Orphan reminder: no activityId and no open activity references it.
+// If the text is an activity check-back template, it is stale from the old
+// shared-reminder system ? complete it silently. Otherwise create an activity
+// from the reminder text and bidirectionally bind it.
+function reconcileOrphanReminder(app, reminder) {
+  const openActivities = app.projectServices?.activity?.list?.({ limit: 50 })?.activities || [];
+  const reminderActivityId = normalizeText(reminder?.activityId);
+  const hasBoundActivity = reminderActivityId
+    ? openActivities.some((a) => a.id === reminderActivityId)
+    : openActivities.some((a) => a.reminderId === reminder.id);
+  if (hasBoundActivity) {
+    return;
+  }
+  const text = normalizeText(reminder?.text);
+  if (text.includes("Activity check-back")) {
+    try { app.reminderQueue.complete({ id: reminder.id }); } catch {}
+    console.log(`[cyberboss] completed stale activity check-back reminder ${reminder.id}`);
+    return;
+  }
+  const title = text.length > 60 ? `${text.slice(0, 57)}...` : text;
+  const activity = app.projectServices.activity.add({ title, reminderId: reminder.id });
+  try {
+    app.reminderQueue.bindActivity({ id: reminder.id, activityId: activity.id });
+  } catch (error) {
+    console.warn(`[cyberboss] orphan reminder bindActivity failed: ${error?.message || error}`);
+  }
+  console.log(`[cyberboss] created activity "${title}" for orphan reminder ${reminder.id}`);
 }
 
 function buildReminderSystemTrigger(reminder, config) {
