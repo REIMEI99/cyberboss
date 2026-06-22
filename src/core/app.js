@@ -1690,10 +1690,9 @@ function shouldAuditHabitClosure(text) {
 }
 
 function captureSideEffectSnapshot(config) {
-  const trackedPaths = [
-    config?.reminderQueueFile,
-    config?.seedboxFile,
-    config?.agentMemoryFile,
+ const trackedPaths = [
+   config?.reminderQueueFile,
+   config?.agentMemoryFile,
     config?.habitDefinitionsFile,
     config?.habitEventsFile,
     config?.habitStateFile,

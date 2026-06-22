@@ -36,56 +36,54 @@ function createHost() {
           return { id: "system-1", ...args };
         },
       },
-      seedbox: {
-        create(args) {
+      agentMemory: {
+        async remember(args) {
           return {
-            id: "seed-1",
-            kind: args.kind || "wishseed",
-            title: args.title,
+            id: "mem-1",
+            type: args.type || "preference",
+            subject: args.subject || "Test subject",
+            content: args.content || "",
             tags: args.tags || [],
-            notes: args.notes || "",
+            status: "active",
             createdAt: "2026-06-21T00:00:00.000Z",
             updatedAt: "2026-06-21T00:00:00.000Z",
-            completedAt: "",
           };
         },
         list(args) {
           return {
             count: 1,
-            items: [{
-              id: "seed-1",
-              kind: args.kind || "wishseed",
-              title: "Read later",
+            memories: [{
+              id: "mem-1",
+              type: args.type || "wishseed",
+              subject: "Read later",
+              content: "",
               tags: [],
-              notes: "",
+              status: "active",
               createdAt: "2026-06-21T00:00:00.000Z",
               updatedAt: "2026-06-21T00:00:00.000Z",
-              completedAt: "",
             }],
           };
         },
-        update(args) {
-          return {
-            id: args.id,
-            kind: args.kind || "wishseed",
-            title: args.title || "Read later",
-            tags: args.tags || [],
-            notes: args.notes || "",
-            createdAt: "2026-06-21T00:00:00.000Z",
-            updatedAt: "2026-06-21T01:00:00.000Z",
-            completedAt: "",
-          };
+        search(args) {
+          return { count: 1, memories: [{ id: "mem-1", type: "wishseed", subject: args.query }] };
         },
-        complete(args) {
+        update(args) {
+          return { id: args.id, type: "wishseed", subject: args.subject || "Read later", content: "", tags: [], status: "active", createdAt: "2026-06-21T00:00:00.000Z", updatedAt: "2026-06-21T01:00:00.000Z" };
+        },
+        forget(args) {
+          return { id: args.id, type: "preference", subject: "Forgotten", content: "", tags: [], status: "archived", createdAt: "2026-06-21T00:00:00.000Z", updatedAt: "2026-06-21T01:00:00.000Z" };
+        },
+        async complete(args) {
           return {
             id: args.id,
-            kind: "wishseed",
-            title: "Read later",
+            type: "wishseed",
+            subject: "Housing plan",
+            content: args.notes || "",
             tags: [],
-            notes: args.notes || "",
+            status: "active",
+            completedAt: "2026-06-21T02:00:00.000Z",
             createdAt: "2026-06-21T00:00:00.000Z",
             updatedAt: "2026-06-21T02:00:00.000Z",
-            completedAt: "2026-06-21T02:00:00.000Z",
           };
         },
       },
@@ -358,36 +356,36 @@ test("tool host exposes structured timeline read tools", async () => {
   assert.equal(proposalsResult.text, "Timeline proposals loaded: 1.");
 });
 
-test("tool host exposes simplified seedbox tools without legacy fields in schema", async () => {
+test("tool host exposes memory tools including complete", async () => {
   const host = createHost();
-  const createTool = host.listTools().find((tool) => tool.name === "cyberboss_seedbox_create");
-  const listTool = host.listTools().find((tool) => tool.name === "cyberboss_seedbox_list");
-  const updateTool = host.listTools().find((tool) => tool.name === "cyberboss_seedbox_update");
+  const rememberTool = host.listTools().find((tool) => tool.name === "cyberboss_memory_remember");
+  const listTool = host.listTools().find((tool) => tool.name === "cyberboss_memory_list");
+  const completeTool = host.listTools().find((tool) => tool.name === "cyberboss_memory_complete");
 
-  assert.ok(createTool);
+  assert.ok(rememberTool);
   assert.ok(listTool);
-  assert.ok(updateTool);
-  assert.doesNotMatch(createTool.description, /status|priority|nextAction/);
+  assert.ok(completeTool);
+  assert.doesNotMatch(rememberTool.description, /status|priority|nextAction/);
   assert.doesNotMatch(listTool.description, /includeDone|status/);
-  assert.doesNotMatch(updateTool.description, /status|priority|nextAction/);
+  assert.doesNotMatch(completeTool.description, /status|priority|nextAction/);
 
-  const createResult = await host.invokeTool("cyberboss_seedbox_create", {
-    kind: "concern",
-    title: "Housing uncertainty",
-    notes: "Keep an eye on it.",
+  const rememberResult = await host.invokeTool("cyberboss_memory_remember", {
+    type: "concern",
+    subject: "Housing uncertainty",
+    content: "Keep an eye on it.",
   }, {});
-  const listResult = await host.invokeTool("cyberboss_seedbox_list", {
-    kind: "concern",
-    includeCompleted: true,
+  const listResult = await host.invokeTool("cyberboss_memory_list", {
+    type: "concern",
+    includeArchived: true,
   }, {});
-  const updateResult = await host.invokeTool("cyberboss_seedbox_update", {
+  const completeResult = await host.invokeTool("cyberboss_memory_complete", {
     id: "seed-1",
-    title: "Housing plan",
+    notes: "Resolved",
   }, {});
 
-  assert.equal(createResult.text, "Seedbox item stored: Housing uncertainty");
-  assert.equal(listResult.text, "Seedbox items loaded: 1.");
-  assert.equal(updateResult.text, "Seedbox item updated: Housing plan");
+  assert.equal(rememberResult.text, "Memory stored: Housing uncertainty");
+  assert.equal(listResult.text, "Memories loaded: 1.");
+  assert.equal(completeResult.text, "Memory completed: Housing plan");
 });
 
 test("tool host exposes habit tools", async () => {

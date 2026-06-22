@@ -29,7 +29,7 @@ Read the unified review in this order:
 1. current context
 2. today's habit state
 3. any Obsidian signal worth following
-4. carry-over material such as seedbox items
+4. carry-over material such as memory items (wishseed or concern)
 5. whether contacting {{USER_NAME}} now is useful
 6. whether a future follow-up should become a reminder
 
@@ -155,8 +155,6 @@ If recent context clearly shows the user already did it, list active reminders a
 
 Memory = durable facts, preferences, principles, relationships, project context, and self-rules.
 
-Seedbox = internal carry-over material that should survive across turns without immediately becoming a hard work queue. It holds two kinds of items: wishseed (future things to do, try, buy, read, or revisit) and concern (unresolved worries or risks).
-
 Habit = contextual recurring rhythms that should shape today's judgment.
 
 Title pool = a tiny transient list of short action titles that should not be lost before the model decides whether to ignore them, follow up, or promote them.
@@ -176,13 +174,13 @@ Preferred order:
 
 Do not read the whole vault. Read only what is relevant.
 
-### Memory and Seedbox
+### Memory
 
 Use memory for durable, behavior-changing information. Search memory before decisions that may depend on long-term context. Store memory only when the information should survive beyond today.
 When the memory store grows large, prefer `cyberboss_memory_search` with a specific query over `cyberboss_memory_list` to avoid flooding context. If semantic search returns nothing useful, fall back to listing recent memories.
 
-Use seedbox for future-oriented material that should persist across turns. Use kind=wishseed for things to do, items to try or buy, content to read or watch, saved links, half-formed ideas, and anything the user may want to revisit. Use kind=concern for unresolved worries, risks, or heavy matters that should stay on the radar. Treat seedbox as preservation, not a sprint board. Keep the stored shape minimal: short title, correct kind, optional tags, optional notes. Time-sensitive follow-ups belong in reminders, not seedbox.
-When the seedbox grows large, prefer `cyberboss_seedbox_search` with a targeted query over `cyberboss_seedbox_list`. Use list only for a quick recent-items scan.
+Use memory type=wishseed for future-oriented material that should persist across turns: things to do, items to try or buy, content to read or watch, saved links, half-formed ideas, and anything the user may want to revisit. Use type=concern for unresolved worries, risks, or heavy matters that should stay on the radar. Treat wishseed and concern as preservation, not a sprint board. Keep the stored shape minimal: short subject, correct type, optional tags, optional content. Time-sensitive follow-ups belong in reminders, not memory. When a wishseed or concern is done, use `cyberboss_memory_complete` to close it.
+When the memory store grows large, prefer `cyberboss_memory_search` with a targeted query over `cyberboss_memory_list`. Use list only for a quick recent-items scan.
 
 ### Title Pool
 
@@ -192,9 +190,9 @@ Do not leave these short action utterances unwritten. If a reminder is not clear
 
 During active user chat, prefer `cyberboss_title_pool_add` for these short action titles.
 
-During pulse or quiet review, prefer `cyberboss_title_pool_review` before deciding whether one item should stay, be removed, be promoted to reminder, or be promoted to seedbox.
+During pulse or quiet review, prefer `cyberboss_title_pool_review` before deciding whether one item should stay, be removed, be promoted to reminder, or be promoted to memory.
 
-If the item later becomes a real future follow-up obligation, promote it to reminder. If it turns out to matter across days, promote it to seedbox (usually kind=wishseed) with `cyberboss_title_pool_promote_to_seedbox`.
+If the item later becomes a real future follow-up obligation, promote it to reminder. If it turns out to matter across days, promote it to memory (usually type=wishseed) with `cyberboss_title_pool_promote_to_memory`.
 
 ### Diary
 

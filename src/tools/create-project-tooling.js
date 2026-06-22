@@ -9,9 +9,8 @@ const { HabitProvider } = require("../habit/habit-provider");
 const { HabitService } = require("../habit/habit-service");
 const { ObsidianService } = require("../services/obsidian-service");
 const { ReminderService } = require("../services/reminder-service");
-const { SeedboxService } = require("../services/seedbox-service");
 const { StickerService } = require("../services/sticker-service");
-const { SystemMessageService } = require("../services/system-message-service");
+ const { SystemMessageService } = require("../services/system-message-service");
 const { TimelineService } = require("../services/timeline-service");
 const { TitlePoolService } = require("../services/title-pool-service");
 const { RuntimeContextStore } = require("./runtime-context-store");
@@ -31,10 +30,9 @@ function createProjectTooling(config, options = {}) {
   const channelFile = new ChannelFileService({ config, channelAdapter, sessionStore });
   const habit = new HabitService(buildHabitServiceOptions(config));
   const embedding = new EmbeddingService({ config });
-  const services = {
-    seedbox: new SeedboxService({ config, embeddingService: embedding }),
-    agentMemory: new AgentMemoryService({ config, embeddingService: embedding }),
-    embedding,
+ const services = {
+   agentMemory: new AgentMemoryService({ config, embeddingService: embedding }),
+   embedding,
     diary: new DiaryService({ config }),
     habit,
     habitProvider: new HabitProvider({ habitService: habit }),

@@ -3,7 +3,11 @@ const path = require("path");
 const crypto = require("crypto");
 const { rankByEmbedding } = require("./embedding-service");
 
-const MEMORY_TYPES = new Set(["preference", "fact", "principle", "relationship", "project", "self"]);
+const MEMORY_TYPES = new Set([
+  "preference", "fact", "principle", "relationship", "project", "self",
+  "wishseed", "concern",
+]);
+const COMPLETABLE_TYPES = new Set(["wishseed", "concern", "project"]);
 const MEMORY_STATUSES = new Set(["active", "archived"]);
 
 class AgentMemoryService {
@@ -14,6 +18,56 @@ class AgentMemoryService {
     this.state = { memories: [] };
     this.ensureParentDirectory();
     this.loadSync();
+    this.migrateSeedbox();
+  }
+
+  readStateFile(filePath) {
+    if (!filePath) {
+      return null;
+    }
+    try {
+      const raw = fs.readFileSync(filePath, "utf8");
+      return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+  }
+
+  migrateSeedbox() {
+    const seedboxFile = this.config?.seedboxFile;
+    if (!seedboxFile) {
+      return;
+    }
+    const raw = this.readStateFile(seedboxFile);
+    if (!raw) {
+      return;
+    }
+    const items = Array.isArray(raw?.items)
+      ? raw.items
+      : Array.isArray(raw?.tasks)
+        ? raw.tasks
+        : [];
+    if (!items.length) {
+      return;
+    }
+    const existingIds = new Set(this.state.memories.map((memory) => memory.id));
+    const migrated = items
+      .map((item) => migrateSeedboxItem(item, existingIds))
+      .filter(Boolean);
+    if (!migrated.length) {
+      return;
+    }
+    this.state.memories.push(...migrated);
+    this.state.memories.sort(compareMemories);
+    this.save();
+    console.log(`[cyberboss] migrated ${migrated.length} seedbox items into memory`);
+    try {
+      const backupPath = seedboxFile + ".migrated";
+      fs.writeFileSync(backupPath, JSON.stringify(raw, null, 2));
+      fs.unlinkSync(seedboxFile);
+    } catch (error) {
+      console.warn(`[cyberboss] seedbox migration cleanup failed: ${error?.message || error}`);
+    }
   }
 
   ensureParentDirectory() {
@@ -40,6 +94,9 @@ class AgentMemoryService {
   async remember(input = {}) {
     this.loadSync();
     const now = new Date().toISOString();
+    const completedAt = COMPLETABLE_TYPES.has(normalizeText(input.type).toLowerCase())
+      ? ""
+      : normalizeIsoTime(input.completedAt);
     const memory = normalizeMemory({
       id: crypto.randomUUID(),
       type: input.type,
@@ -52,6 +109,7 @@ class AgentMemoryService {
       expiresAt: input.expiresAt,
       expiresAtMs: normalizeTimeMs(input.expiresAtMs || input.expiresAt),
       tags: input.tags,
+      completedAt,
       createdAt: now,
       updatedAt: now,
       lastUsedAt: "",
@@ -67,11 +125,37 @@ class AgentMemoryService {
     return memory;
   }
 
+  async complete({ id = "", notes = "" } = {}) {
+    this.loadSync();
+    const memoryId = normalizeText(id);
+    if (!memoryId) {
+      throw new Error("Memory complete requires id.");
+    }
+    const index = this.state.memories.findIndex((memory) => memory.id === memoryId);
+    if (index < 0) {
+      throw new Error(`Memory not found: ${memoryId}`);
+    }
+    const current = this.state.memories[index];
+    const completedAt = new Date().toISOString();
+    const next = normalizeMemory({
+      ...current,
+      content: normalizeText(notes) || current.content,
+      completedAt,
+      updatedAt: completedAt,
+    });
+    this.state.memories[index] = next;
+    this.state.memories.sort(compareMemories);
+    this.save();
+    return next;
+  }
+
   list({ type = "", subject = "", includeArchived = false, limit = 20 } = {}) {
     this.loadSync();
     const normalizedType = normalizeText(type).toLowerCase();
     const normalizedSubject = normalizeText(subject).toLowerCase();
+    const includeCompleted = includeArchived === true;
     const memories = this.state.memories
+      .filter((memory) => includeCompleted || !memory.completedAt)
       .filter((memory) => includeArchived || memory.status === "active")
       .filter((memory) => !normalizedType || memory.type === normalizedType)
       .filter((memory) => !normalizedSubject || memory.subject.toLowerCase().includes(normalizedSubject))
@@ -86,7 +170,9 @@ class AgentMemoryService {
 
   async search({ query = "", limit = 20, includeArchived = false } = {}) {
     this.loadSync();
+    const includeCompleted = includeArchived === true;
     const candidates = this.state.memories
+      .filter((memory) => includeCompleted || !memory.completedAt)
       .filter((memory) => includeArchived || memory.status === "active")
       .filter((memory) => !isExpired(memory));
     if (this.embeddingService?.isConfigured()) {
@@ -259,6 +345,7 @@ function normalizeMemory(value) {
   const sourceRef = normalizeText(value.sourceRef);
   const createdAt = normalizeIsoTime(value.createdAt) || new Date().toISOString();
   const updatedAt = normalizeIsoTime(value.updatedAt) || createdAt;
+  const completedAt = resolveCompletedAt(value, updatedAt || createdAt);
   const expiresAtMs = normalizeTimeMs(value.expiresAtMs || value.expiresAt);
   const lastUsedAt = normalizeIsoTime(value.lastUsedAt);
   const lastUsedAtMs = normalizeTimeMs(value.lastUsedAtMs || value.lastUsedAt);
@@ -283,6 +370,7 @@ function normalizeMemory(value) {
     updatedAt,
     lastUsedAt,
     lastUsedAtMs,
+    completedAt,
     embedding,
   };
 }
@@ -328,6 +416,11 @@ function scoreMemory(memory, terms) {
 }
 
 function compareMemories(left, right) {
+  const leftCompleted = Boolean(left.completedAt);
+  const rightCompleted = Boolean(right.completedAt);
+  if (leftCompleted !== rightCompleted) {
+    return leftCompleted ? 1 : -1;
+  }
   if (left.status !== right.status) {
     return left.status === "active" ? -1 : 1;
   }
@@ -335,6 +428,56 @@ function compareMemories(left, right) {
     return right.confidence - left.confidence;
   }
   return String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""));
+}
+
+function resolveCompletedAt(value, fallbackTime) {
+  const completedAt = normalizeIsoTime(value.completedAt);
+  if (completedAt) {
+    return completedAt;
+  }
+  return "";
+}
+
+function migrateSeedboxItem(item, existingIds) {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+  const id = normalizeText(item.id);
+  if (!id || existingIds.has(id)) {
+    return null;
+  }
+  const kind = normalizeChoice(item.kind, new Set(["wishseed", "concern"]), "wishseed");
+  const title = normalizeText(item.title);
+  if (!title) {
+    return null;
+  }
+  existingIds.add(id);
+  const createdAt = normalizeIsoTime(item.createdAt) || new Date().toISOString();
+  const updatedAt = normalizeIsoTime(item.updatedAt) || createdAt;
+  const completedAt = normalizeIsoTime(item.completedAt) || resolveLegacySeedboxCompletedAt(item, updatedAt);
+  const tags = normalizeStringList(item.tags);
+  const notes = normalizeText(item.notes);
+  return normalizeMemory({
+    id,
+    type: kind,
+    subject: title,
+    content: notes || title,
+    status: "active",
+    confidence: 0.5,
+    source: "seedbox_migration",
+    tags,
+    createdAt,
+    updatedAt,
+    completedAt,
+  });
+}
+
+function resolveLegacySeedboxCompletedAt(item, fallbackTime) {
+  const legacyStatus = normalizeText(item.status).toLowerCase();
+  if (legacyStatus === "done" || legacyStatus === "cancelled") {
+    return normalizeIsoTime(item.updatedAt) || fallbackTime || new Date().toISOString();
+  }
+  return "";
 }
 
 function isExpired(memory) {
@@ -404,4 +547,4 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-module.exports = { AgentMemoryService };
+module.exports = { AgentMemoryService, COMPLETABLE_TYPES, MEMORY_TYPES };

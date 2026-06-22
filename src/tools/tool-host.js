@@ -81,7 +81,6 @@ function listProjectToolNames() {
 
 const DEFAULT_HIDDEN_TOOL_NAMES = new Set([
   "cyberboss_memory_list",
-  "cyberboss_seedbox_list",
   "cyberboss_habit_list",
   "cyberboss_habit_status_today",
   "cyberboss_habit_history",
@@ -102,7 +101,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_pulse_review",
     description: "Run the default pulse review flow in one step: inspect current context, habit status, an Obsidian signal, title-pool items, future material worth revisiting, and whether there is a good reason to message the user or set a follow-up reminder.",
     shortHint: "Run the default pulse review flow.",
-    topics: ["pulse", "habit", "obsidian", "pool", "seedbox", "reminder"],
+    topics: ["pulse", "habit", "obsidian", "pool", "reminder"],
     inputSchema: {
       type: "object",
       properties: {
@@ -111,18 +110,16 @@ const PROJECT_TOOLS = [
         userState: { type: "string", description: "Current inferred user state such as focused, low load, at home, after meal." },
         obsidianQuery: { type: "string", description: "Optional query for targeted Obsidian search. If omitted, a random daily excerpt is preferred." },
         includeObsidianExcerpt: { type: "boolean", description: "Whether to include a random daily-note excerpt when no query is provided. Defaults to true." },
-        includeTitlePool: { type: "boolean", description: "Whether to include current title-pool items. Defaults to true." },
-        includeSeedbox: { type: "boolean", description: "Whether to include active seedbox items. Defaults to true." },
-        includeMemories: { type: "boolean", description: "Whether to include a few recent durable memories. Defaults to true." },
+       includeTitlePool: { type: "boolean", description: "Whether to include current title-pool items. Defaults to true." },
+       includeMemories: { type: "boolean", description: "Whether to include a few recent durable memories. Defaults to true." },
       },
       additionalProperties: false,
     },
     async handler({ services, args, context, runtimeContextStore }) {
       const turnIntent = normalizeTurnIntent(args.turnIntent);
       const includeObsidianExcerpt = args.includeObsidianExcerpt !== false;
-      const includeTitlePool = args.includeTitlePool !== false;
-      const includeSeedbox = args.includeSeedbox !== false;
-      const includeMemories = args.includeMemories !== false;
+     const includeTitlePool = args.includeTitlePool !== false;
+     const includeMemories = args.includeMemories !== false;
       const obsidianQuery = normalizeText(args.obsidianQuery);
       const pulseWorkspaceKey = resolvePulseWorkspaceKey(context);
       const habitClosureSnapshot = services.habit.getTodayClosureSnapshot();
@@ -182,78 +179,14 @@ const PROJECT_TOOLS = [
         version: buildHabitExposureVersion(habitClosureSnapshot),
       });
 
-      // When embedding search is configured, memories/seedbox use semantic
-      // search keyed off the current context with id-based dedup across recent
-      // pulses instead of the time-based cooldown. Same context repeated will
-      // keep surfacing the same top hits, so dedup suppresses repeats; a new
-      // topic changes the query and naturally surfaces fresh items.
+      // When embedding search is configured, memories use semantic
+     // search keyed off the current context with id-based dedup across recent
+     // pulses instead of the time-based cooldown. Same context repeated will
+     // keep surfacing the same top hits, so dedup suppresses repeats; a new
+     // topic changes the query and naturally surfaces fresh items.
       let memories;
       let memoryExposureMode;
       let memoryExposureReason;
-      let seedbox;
-      let seedboxExposureMode;
-      let seedboxExposureReason;
-      if (services.embedding?.isConfigured()) {
-        const memoryPulse = await collectPulseSearchMemories({
-          services,
-          context: args.context,
-          runtimeContextStore,
-          workspaceKey: pulseWorkspaceKey,
-          enabled: includeMemories,
-        });
-        memories = {
-          ...memoryPulse.result,
-          exposureMode: memoryPulse.mode,
-          exposureReason: memoryPulse.reason,
-        };
-        memoryExposureMode = memoryPulse.mode;
-        memoryExposureReason = memoryPulse.reason;
-
-        const seedboxPulse = await collectPulseSearchSeedbox({
-          services,
-          context: args.context,
-          runtimeContextStore,
-          workspaceKey: pulseWorkspaceKey,
-          enabled: includeSeedbox,
-        });
-        seedbox = {
-          ...seedboxPulse.result,
-          exposureMode: seedboxPulse.mode,
-          exposureReason: seedboxPulse.reason,
-        };
-        seedboxExposureMode = seedboxPulse.mode;
-        seedboxExposureReason = seedboxPulse.reason;
-      } else {
-        memories = includeMemories
-          ? services.agentMemory.list({ limit: 5, includeArchived: false })
-          : { count: 0, memories: [] };
-        seedbox = includeSeedbox
-          ? services.seedbox.list({ limit: 5, includeDone: false })
-          : { count: 0, items: [] };
-
-        const memoryExposure = decidePulseExposure({
-          runtimeContextStore,
-          workspaceKey: pulseWorkspaceKey,
-          moduleName: "memories",
-          version: buildFileExposureVersion(memories.filePath),
-          enabled: includeMemories,
-        });
-        memories = applyMemoryPulseExposure(memories, memoryExposure);
-        memoryExposureMode = memoryExposure.mode;
-        memoryExposureReason = memoryExposure.reason;
-
-        const seedboxExposure = decidePulseExposure({
-          runtimeContextStore,
-          workspaceKey: pulseWorkspaceKey,
-          moduleName: "seedbox",
-          version: buildFileExposureVersion(seedbox.filePath),
-          enabled: includeSeedbox,
-        });
-        seedbox = applySeedboxPulseExposure(seedbox, seedboxExposure);
-        seedboxExposureMode = seedboxExposure.mode;
-        seedboxExposureReason = seedboxExposure.reason;
-      }
-
       const summary = buildPulseReviewSummary({
         turnIntent,
         context: args.context,
@@ -262,9 +195,8 @@ const PROJECT_TOOLS = [
         habitSuggestion,
         obsidian,
         memories,
-        titlePool,
-        seedbox,
-      });
+       titlePool,
+     });
 
       return {
         text: summary.messageOpportunity.shouldContactUser
@@ -278,7 +210,6 @@ const PROJECT_TOOLS = [
           obsidian,
           memories,
           titlePool,
-          seedbox,
           messageOpportunity: summary.messageOpportunity,
           followupOpportunity: summary.followupOpportunity,
           recommendedPrivateActions: summary.recommendedPrivateActions,
@@ -286,7 +217,6 @@ const PROJECT_TOOLS = [
             habit: habitExposure.mode,
             memories: memoryExposureMode,
             titlePool: includeTitlePool ? "full" : "disabled",
-            seedbox: seedboxExposureMode,
           },
         },
       };
@@ -296,7 +226,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_followup_decide",
     description: "Turn a follow-up judgment into the default action: create a reminder when later follow-up is warranted, otherwise record that no reminder is needed.",
     shortHint: "Convert follow-up intent into a reminder decision.",
-    topics: ["reminder", "pulse", "seedbox"],
+    topics: ["reminder", "pulse"],
     inputSchema: {
       type: "object",
       required: ["summary"],
@@ -355,12 +285,12 @@ const PROJECT_TOOLS = [
     name: "cyberboss_title_pool_add",
     description: "Add one short action title to the lightweight title pool. Use this when the user mentions something they intend to do and it should not be lost, but a time-based reminder is not yet the right move.",
     shortHint: "Add a short action title to title pool.",
-    topics: ["pool", "reminder", "seedbox"],
+    topics: ["pool", "reminder"],
     inputSchema: {
       type: "object",
       required: ["title"],
       properties: {
-        title: { type: "string", description: "Short action title such as 去洗澡, 收衣服, or 吃甘氨酸镁." },
+        title: { type: "string", description: "Short action title such as 鍘绘礂婢? 鏀惰。鏈? or 鍚冪敇姘ㄩ吀闀?" },
       },
       additionalProperties: false,
     },
@@ -376,7 +306,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_title_pool_list",
     description: "List the lightweight title pool. Read this when checking short current-action titles the model should keep in view without over-structuring them.",
     shortHint: "List title pool items.",
-    topics: ["pool", "reminder", "seedbox"],
+    topics: ["pool", "reminder"],
     inputSchema: {
       type: "object",
       properties: {
@@ -479,10 +409,10 @@ const PROJECT_TOOLS = [
    },
  },
   {
-    name: "cyberboss_title_pool_promote_to_seedbox",
-    description: "Promote one title pool item into a seedbox item, then remove it from the title pool. Use this when a lightweight current-action title turns out to be future-useful material worth preserving across turns.",
-    shortHint: "Promote a title pool item to seedbox.",
-    topics: ["pool", "seedbox"],
+    name: "cyberboss_title_pool_promote_to_memory",
+    description: "Promote one title pool item into a memory (type wishseed or concern), then remove it from the title pool. Use this when a lightweight current-action title turns out to be future-useful material worth preserving across turns.",
+    shortHint: "Promote a title pool item to memory.",
+    topics: ["pool", "memory"],
     inputSchema: {
       type: "object",
       required: ["id"],
@@ -493,18 +423,19 @@ const PROJECT_TOOLS = [
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const item = services.titlePool.remove({ id: args.id });
-      try {
-        const seedbox = await services.seedbox.create({
-          title: item.title,
-          kind: normalizeText(args.kind) || "wishseed",
-        });
-        return {
-          text: `Title pool item promoted to seedbox: ${item.title}`,
-          data: {
-            item,
-            seedbox,
-          },
+     const item = services.titlePool.remove({ id: args.id });
+     try {
+        const memory = await services.agentMemory.remember({
+          type: normalizeText(args.kind) || "wishseed",
+          subject: item.title,
+          content: item.title,
+       });
+       return {
+          text: `Title pool item promoted to memory: ${item.title}`,
+         data: {
+           item,
+            memory,
+         },
         };
       } catch (error) {
         services.titlePool.add({ title: item.title });
@@ -516,12 +447,12 @@ const PROJECT_TOOLS = [
     name: "cyberboss_memory_remember",
     description: "Store a long-term structured memory that should influence future judgment. Do not use this for diary-like logs or tiny one-off details.",
     shortHint: "Store a long-term memory.",
-    topics: ["memory", "seedbox"],
+    topics: ["memory"],
     inputSchema: {
       type: "object",
       required: ["type", "subject", "content"],
       properties: {
-        type: { type: "string", description: "preference, fact, principle, relationship, project, or self." },
+        type: { type: "string", description: "preference, fact, principle, relationship, project, wishseed, concern, or self. Use wishseed for future things to do/try/buy/read/revisit; use concern for unresolved worries or risks." },
         subject: { type: "string", description: "Who or what this memory is about." },
         content: { type: "string", description: "The durable fact, preference, principle, or finding." },
         confidence: { type: "number", description: "0 to 1. Defaults to 0.5." },
@@ -543,8 +474,8 @@ const PROJECT_TOOLS = [
   {
     name: "cyberboss_memory_search",
     description: "Search long-term structured memories before making a judgment that may depend on durable user preferences, facts, projects, or relationship context.",
-    shortHint: "Search long-term memories.",
-    topics: ["memory", "seedbox"],
+   shortHint: "Search long-term memories.",
+    topics: ["memory"],
     inputSchema: {
       type: "object",
       required: ["query"],
@@ -638,163 +569,24 @@ const PROJECT_TOOLS = [
       };
     },
   },
- {
-   name: "cyberboss_seedbox_create",
-    description: "Create a structured seedbox item for future-oriented material the agent should not lose across turns. Use wishseed for things to do, try, buy, read, or revisit later; use concern for unresolved worries or risks.",
-   shortHint: "Create a seedbox item.",
-    topics: ["seedbox", "memory"],
-   inputSchema: {
-     type: "object",
-     required: ["title"],
-      properties: {
-        kind: { type: "string", description: "Optional kind: wishseed (future action, idea, saved find, or thing to revisit) or concern (unresolved worry or risk). Defaults to wishseed." },
-        title: { type: "string", description: "Short seedbox title." },
-        tags: { type: "array", items: { type: "string" } },
-        notes: { type: "string", description: "Optional raw details, links, quotes, products, worries, or context that should stay attached to the seedbox item." },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = await services.seedbox.create(args);
-      return {
-        text: `Seedbox item stored: ${result.title}`,
-        data: result,
-      };
-    },
-  },
   {
-    name: "cyberboss_seedbox_list",
-    description: "List structured seedbox items. Use this when checking what unresolved or future-useful material the agent should keep alive across turns.",
-    shortHint: "List seedbox items.",
-    topics: ["seedbox", "memory"],
-    inputSchema: {
-      type: "object",
-      properties: {
-        kind: { type: "string", description: "Optional kind filter." },
-        limit: { type: "integer", description: "Optional maximum seedbox item count." },
-        includeCompleted: { type: "boolean", description: "Whether to include completed seedbox items." },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = services.seedbox.list(args);
-      return {
-        text: `Seedbox items loaded: ${result.count}.`,
-        data: result,
-      };
-    },
-  },
-  {
-    name: "cyberboss_seedbox_search",
-    description: "Search seedbox items by semantic similarity (embedding) or keyword substring fallback. Use this instead of list when looking for a specific topic across a large seedbox.",
-    shortHint: "Search seedbox items.",
-    topics: ["seedbox", "memory"],
-    inputSchema: {
-      type: "object",
-      required: ["query"],
-      properties: {
-        query: { type: "string", description: "Search query." },
-        limit: { type: "integer", description: "Optional maximum result count." },
-        includeCompleted: { type: "boolean", description: "Whether to include completed items." },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = await services.seedbox.search(args);
-      return {
-        text: `Seedbox search results: ${result.count}.`,
-        data: result,
-      };
-    },
-  },
-  {
-    name: "cyberboss_seedbox_update",
-  description: "Update a structured seedbox item after it becomes clearer, more relevant, more concrete, or less useful.",
-  shortHint: "Update a seedbox item.",
-    topics: ["seedbox", "memory"],
-   inputSchema: {
-     type: "object",
-     required: ["id"],
-      properties: {
-        id: { type: "string" },
-        kind: { type: "string", description: "wishseed or concern." },
-        title: { type: "string" },
-        tags: { type: "array", items: { type: "string" } },
-        notes: { type: "string" },
-      },
-      additionalProperties: false,
-    },
-    async handler({ services, args }) {
-      const result = await services.seedbox.update(args);
-      return {
-        text: `Seedbox item updated: ${result.title}`,
-        data: result,
-      };
-    },
-  },
-  {
-    name: "cyberboss_seedbox_complete",
-    description: "Mark a structured seedbox item as resolved, exhausted, or no longer worth keeping active.",
-    shortHint: "Complete a seedbox item.",
-    topics: ["seedbox", "memory"],
+    name: "cyberboss_memory_complete",
+    description: "Mark a structured memory as resolved, exhausted, or no longer active. Use this for wishseed, concern, or project type memories that have a lifecycle and are now done.",
+    shortHint: "Complete a memory.",
+    topics: ["memory"],
     inputSchema: {
       type: "object",
       required: ["id"],
       properties: {
-        id: { type: "string" },
-        notes: { type: "string" },
+        id: { type: "string", description: "Memory id." },
+        notes: { type: "string", description: "Optional closure notes appended to the memory content." },
       },
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = await services.seedbox.complete(args);
+      const result = await services.agentMemory.complete(args);
       return {
-        text: `Seedbox item completed: ${result.title}`,
-        data: result,
-      };
-    },
- },
- ...createHabitToolSpecs(),
-  {
-    name: "cyberboss_memory_reindex",
-    description: "Recompute embeddings for memories that do not yet have one. Run this once after configuring the embedding service to enable semantic search over existing memories.",
-    shortHint: "Reindex memory embeddings.",
-    topics: ["memory"],
-    inputSchema: {
-      type: "object",
-      properties: {},
-      additionalProperties: false,
-    },
-    async handler({ services }) {
-      const result = await services.agentMemory.reindex();
-      return {
-        text: result.skipped
-          ? `Memory reindex skipped: ${result.reason}`
-          : result.error
-            ? `Memory reindex failed: ${result.error}`
-            : `Memory reindex completed: ${result.reindexed} embedding(s) computed.`,
-        data: result,
-      };
-    },
-  },
-  {
-    name: "cyberboss_seedbox_reindex",
-    description: "Recompute embeddings for seedbox items that do not yet have one. Run this once after configuring the embedding service to enable semantic search over existing seedbox items.",
-    shortHint: "Reindex seedbox embeddings.",
-    topics: ["seedbox"],
-    inputSchema: {
-      type: "object",
-      properties: {},
-      additionalProperties: false,
-    },
-    async handler({ services }) {
-      const result = await services.seedbox.reindex();
-      return {
-        text: result.skipped
-          ? `Seedbox reindex skipped: ${result.reason}`
-          : result.error
-            ? `Seedbox reindex failed: ${result.error}`
-            : `Seedbox reindex completed: ${result.reindexed} embedding(s) computed.`,
+        text: `Memory completed: ${result.subject}`,
         data: result,
       };
     },
@@ -985,9 +777,9 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_obsidian_random_daily_excerpt",
-    description: "Pick a random short excerpt from recent Obsidian daily notes. Use this during quiet pulses for serendipitous context before deciding whether to search further or capture a seedbox item.",
+    description: "Pick a random short excerpt from recent Obsidian daily notes. Use this during quiet pulses for serendipitous context before deciding whether to search further or capture a memory item.",
     shortHint: "Pick a random daily-note excerpt.",
-    topics: ["obsidian", "seedbox"],
+    topics: ["obsidian"],
     inputSchema: {
       type: "object",
       properties: {
@@ -1082,7 +874,7 @@ const PROJECT_TOOLS = [
       type: "object",
       required: ["tag"],
       properties: {
-        tag: { type: "string", description: "Sticker tag such as 可爱, 无语, 躺平, 感动, or OK." },
+        tag: { type: "string", description: "Sticker tag such as 鍙埍, 鏃犺, 韬哄钩, 鎰熷姩, or OK." },
         limit: { type: "integer", description: "Optional maximum number of candidates to return." },
       },
       additionalProperties: false,
@@ -1488,24 +1280,21 @@ function buildPulseReviewSummary({
   habitSuggestion,
   obsidian,
   memories,
-  titlePool,
-  seedbox,
+ titlePool,
 }) {
   const incompleteHabits = Array.isArray(habitStatus?.habits)
     ? habitStatus.habits.filter((item) => item?.dailyState === "incomplete")
     : [];
-  const openTitlePoolItems = Array.isArray(titlePool?.items) ? titlePool.items : [];
-  const openSeedboxItems = Array.isArray(seedbox?.items) ? seedbox.items : [];
-  const durableMemories = Array.isArray(memories?.memories) ? memories.memories : [];
+ const openTitlePoolItems = Array.isArray(titlePool?.items) ? titlePool.items : [];
+ const durableMemories = Array.isArray(memories?.memories) ? memories.memories : [];
 
   const currentContextSummary = {
     turnIntent,
     context: normalizeText(context),
     userState: normalizeText(userState),
     incompleteHabitCount: incompleteHabits.length,
-    titlePoolCount: openTitlePoolItems.length,
-    openSeedboxCount: openSeedboxItems.length,
-    memoryCount: durableMemories.length,
+   titlePoolCount: openTitlePoolItems.length,
+   memoryCount: durableMemories.length,
     obsidianSource: normalizeText(obsidian?.source) || "none",
     obsidianFound: detectObsidianSignal(obsidian),
   };
@@ -1526,13 +1315,10 @@ function buildPulseReviewSummary({
   if (!reasons.length && hasInterestingObsidianSignal) {
     reasons.push("Obsidian contains a potentially relevant signal, but it may only justify private review");
   }
-  if (!reasons.length && openTitlePoolItems.length) {
-    reasons.push("there are short current-action titles worth a quick review before they disappear");
-  }
-  if (!reasons.length && openSeedboxItems.length) {
-    reasons.push("there is internal carry-over material worth keeping in view, but none clearly requires interrupting the user");
-  }
-  if (!reasons.length) {
+ if (!reasons.length && openTitlePoolItems.length) {
+   reasons.push("there are short current-action titles worth a quick review before they disappear");
+ }
+ if (!reasons.length) {
     reasons.push("no strong interruption-worthy signal was found");
   }
 
@@ -1561,13 +1347,10 @@ function buildPulseReviewSummary({
   if (followupOpportunity.shouldSetReminder && !shouldContactForReminder) {
     recommendedPrivateActions.push("set a reminder for today's incomplete habit instead of letting it disappear");
   }
-  if (openTitlePoolItems.length) {
-    recommendedPrivateActions.push("review whether one short title-pool item should be removed, quietly followed up, or promoted to reminder");
-  }
-  if (openSeedboxItems.length) {
-    recommendedPrivateActions.push("review whether one seedbox item should be clarified, preserved, or quietly advanced");
-  }
-  if (!recommendedPrivateActions.length) {
+ if (openTitlePoolItems.length) {
+   recommendedPrivateActions.push("review whether one short title-pool item should be removed, quietly followed up, or promoted to reminder");
+ }
+ if (!recommendedPrivateActions.length) {
     recommendedPrivateActions.push("stay silent and wait for a better trigger");
   }
 
@@ -1606,9 +1389,9 @@ const PULSE_DETAIL_COOLDOWN_MS = 60 * 60 * 1000;
 // but skip any id already surfaced within the last PULSE_SHOWN_ROUNDS_WINDOW
 // pulses. Same context repeats -> same candidates -> all deduped -> nothing new
 // returned; a new topic -> new query -> fresh ids. This replaces the
-// time-based cooldown for memories/seedbox when embedding is configured.
-const PULSE_SEARCH_TOP = 3;
-const PULSE_SEARCH_CANDIDATE_LIMIT = 6;
+// time-based cooldown for memories when embedding is configured.
+const PULSE_SEARCH_TOP = 5;
+const PULSE_SEARCH_CANDIDATE_LIMIT = 10;
 const PULSE_SHOWN_ROUNDS_WINDOW = 10;
 
 function getShownIdSet(runtimeContextStore, workspaceKey, moduleName) {
@@ -1670,46 +1453,6 @@ async function collectPulseSearchMemories({
   };
 }
 
-async function collectPulseSearchSeedbox({
-  services,
-  context,
-  runtimeContextStore,
-  workspaceKey,
-  enabled,
-}) {
-  if (!enabled) {
-    return { mode: "disabled", result: { count: 0, items: [] }, reason: "module disabled for this pulse" };
-  }
-  const query = normalizeText(context);
-  const result = await services.seedbox.search({
-    query,
-    limit: PULSE_SEARCH_CANDIDATE_LIMIT,
-    includeCompleted: false,
-  });
-  const shownSet = getShownIdSet(runtimeContextStore, workspaceKey, "seedbox");
-  const candidates = Array.isArray(result?.items) ? result.items : [];
-  const picked = candidates
-    .filter((item) => !shownSet.has(normalizeText(item?.id)))
-    .slice(0, PULSE_SEARCH_TOP);
-  recordPulseShownIds(
-    runtimeContextStore,
-    workspaceKey,
-    "seedbox",
-    picked.map((item) => normalizeText(item?.id)),
-  );
-  return {
-    mode: "search",
-    result: {
-      filePath: result?.filePath || "",
-      query: result?.query || query,
-      count: picked.length,
-      items: picked,
-    },
-    reason: picked.length
-      ? "embedding search top-3 after id dedup"
-      : "no new seedbox items matched after dedup",
-  };
-}
 
 function resolvePulseWorkspaceKey(context = {}) {
   return normalizeText(context?.workspaceRoot) || "__global__";
@@ -1830,30 +1573,6 @@ function applyMemoryPulseExposure(memories, exposure) {
     detailsSuppressed: true,
   };
 }
-
-function applySeedboxPulseExposure(seedbox, exposure) {
-  if (exposure?.mode !== "summary") {
-    return {
-      ...seedbox,
-      exposureMode: exposure?.mode || "full",
-      exposureReason: exposure?.reason || "",
-    };
-  }
-  const items = Array.isArray(seedbox?.items) ? seedbox.items : [];
-  return {
-    filePath: seedbox?.filePath || "",
-    count: Number(seedbox?.count) || items.length,
-    items: [],
-    summary: {
-      titles: items.slice(0, 3).map((item) => normalizeText(item?.title)).filter(Boolean),
-      kinds: uniqueNonEmpty(items.slice(0, 5).map((item) => normalizeText(item?.kind))),
-    },
-    exposureMode: "summary",
-    exposureReason: exposure?.reason || "",
-    detailsSuppressed: true,
-  };
-}
-
 function summarizeHabitStatus(habits) {
   const items = Array.isArray(habits) ? habits : [];
   const summary = {
