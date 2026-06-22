@@ -112,6 +112,9 @@ function createHost() {
         logEvent(args) {
           return { id: "event-5", habitId: args.habitId, type: args.type };
         },
+        getTodayClosureSnapshot() {
+          return { date: "2026-06-19", habitCount: 1, stateEventCount: 0, signature: "" };
+        },
         suggestNextAction() {
           return {
             shouldContactUser: true,
@@ -119,6 +122,17 @@ function createHost() {
             suggestions: [{ habitId: "habit-1", title: "Eat supplements" }],
           };
         },
+      },
+      habitProvider: {
+        getPulseSnapshot() {
+          return {
+            habitStatus: { date: "2026-06-19", count: 1, habits: [{ habit: { id: "habit-1", title: "Eat supplements" }, dailyState: "incomplete" }] },
+            habitSuggestion: { shouldContactUser: false, reason: "cooldown active" },
+          };
+        },
+      },
+      embedding: {
+        isConfigured() { return false; },
       },
       obsidian: {
         getStatus() {
@@ -143,28 +157,27 @@ function createHost() {
       },
       activity: {
         add(args) {
-          return { id: "act-1", title: args.title, state: "intended", note: "", checkBackMinutes: 0, intendedAt: "2026-06-22T00:00:00.000Z", startedAt: "", completedAt: "", createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:00:00.000Z" };
-        },
-        start(args) {
-          return { id: args.id, title: "去洗澡", state: "active", note: "", checkBackMinutes: 0, intendedAt: "2026-06-22T00:00:00.000Z", startedAt: "2026-06-22T00:01:00.000Z", completedAt: "", createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:01:00.000Z" };
+          return { id: "act-1", title: args.title, reminderId: args.reminderId || "rem-1", createdAt: "2026-06-22T00:00:00.000Z" };
         },
         complete(args) {
-          return { id: args.id, title: "去洗澡", state: "done", note: "", checkBackMinutes: 0, intendedAt: "2026-06-22T00:00:00.000Z", startedAt: "2026-06-22T00:01:00.000Z", completedAt: "2026-06-22T00:02:00.000Z", createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:02:00.000Z" };
+          return { id: args.id, title: "test-activity", reminderId: "rem-1", createdAt: "2026-06-22T00:00:00.000Z", completedAt: "2026-06-22T00:02:00.000Z", remainingOpenCount: 0 };
         },
         drop(args) {
-          return { id: args.id, title: "回消息", state: "dropped", note: args.note || "", checkBackMinutes: 0, intendedAt: "2026-06-22T00:00:00.000Z", startedAt: "", completedAt: "2026-06-22T00:03:00.000Z", createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:03:00.000Z" };
+          return { id: args.id, title: "test-activity", reminderId: "rem-1", createdAt: "2026-06-22T00:00:00.000Z", remainingOpenCount: 0 };
         },
         list(args) {
-          return { count: 1, activities: [{ id: "act-1", title: "去洗澡", state: "intended" }] };
+          return { count: 1, activities: [{ id: "act-1", title: "test-activity", reminderId: "rem-1", createdAt: new Date().toISOString() }] };
         },
-        reviewStale() {
+        listDone(args) {
           return { count: 0, activities: [] };
         },
-        remove(args) {
-          return { id: args.id, title: "去洗澡", state: "intended" };
+        allIds() {
+          return ["act-1"];
         },
-      },
-      channelFile: {
+        remove(args) {
+          return { id: args.id, title: "test-activity" };
+        },
+      },      channelFile: {
         async sendToCurrentChat(args) {
           return { filePath: args.filePath, userId: args.userId || "user-1" };
         },
@@ -335,6 +348,8 @@ function createHost() {
       resolveActiveContext() {
         return {};
       },
+      getPulseExposureModule() { return null; },
+      setPulseExposureModule() {},
     },
   });
 }
@@ -406,26 +421,23 @@ test("tool host exposes Obsidian random excerpt", async () => {
 test("tool host exposes activity tools", async () => {
   const host = createHost();
   const addResult = await host.invokeTool("cyberboss_activity_add", {
-    title: "去洗澡",
+    title: "test-activity",
   }, {});
   const listResult = await host.invokeTool("cyberboss_activity_list", {}, {});
-  const startResult = await host.invokeTool("cyberboss_activity_start", {
-    id: "act-1",
-  }, {});
   const completeResult = await host.invokeTool("cyberboss_activity_complete", {
     id: "act-1",
   }, {});
   const dropResult = await host.invokeTool("cyberboss_activity_drop", {
     id: "act-2",
   }, {});
+  const doneResult = await host.invokeTool("cyberboss_activity_list_done", {}, {});
 
-  assert.equal(addResult.text, "Activity added: 去洗澡");
+  assert.equal(addResult.text, "Activity added: test-activity");
   assert.equal(listResult.text, "Activities loaded: 1.");
-  assert.equal(startResult.text, "Activity started: 去洗澡");
-  assert.equal(completeResult.text, "Activity completed: 去洗澡");
-  assert.equal(dropResult.text, "Activity dropped: 回消息");
+  assert.equal(completeResult.text, "Activity completed: test-activity");
+  assert.equal(dropResult.text, "Activity dropped: test-activity");
+  assert.equal(doneResult.text, "Done activities: 0.");
 });
-
 test("tool host validates structured reminder input types", async () => {
   const host = createHost();
   await assert.rejects(async () => {
@@ -557,4 +569,89 @@ test("tool host rejects timeline events without title or eventNodeId", async () 
       ],
     }, {});
   }, /input\.events\[0\]\.title or input\.events\[0\]\.eventNodeId is required/);
+});
+
+test("pulse review returns memories from token search when embedding is not configured", async () => {
+  const host = createHost();
+  const result = await host.invokeTool("cyberboss_pulse_review", {
+    turnIntent: "pulse",
+    context: "reading habits",
+    includeObsidianExcerpt: false,
+    includeMemories: true,
+    includeActivities: false,
+  }, {});
+  assert.equal(result.data.exposureMode.memories, "token");
+  assert.ok(result.data.memories);
+  assert.equal(result.data.memories.count, 1);
+  assert.equal(result.data.memories.memories[0].id, "mem-1");
+  assert.equal(result.data.currentContextSummary.memoryCount, 1);
+});
+
+test("pulse review with includeMemories false returns no memories", async () => {
+  const host = createHost();
+  const result = await host.invokeTool("cyberboss_pulse_review", {
+    turnIntent: "pulse",
+    context: "reading habits",
+    includeObsidianExcerpt: false,
+    includeMemories: false,
+    includeActivities: false,
+  }, {});
+  assert.equal(result.data.exposureMode.memories, "disabled");
+  assert.equal(result.data.memories.count, 0);
+  assert.equal(result.data.currentContextSummary.memoryCount, 0);
+});
+
+test("pulse review skips obsidian for user_message turns", async () => {
+  const host = createHost();
+  const result = await host.invokeTool("cyberboss_pulse_review", {
+    turnIntent: "user_message",
+    context: "what am I doing",
+    includeObsidianExcerpt: true,
+    includeMemories: false,
+    includeActivities: false,
+  }, {});
+  assert.equal(result.data.obsidian.source, "skipped");
+  assert.equal(result.data.obsidian.skipped, true);
+  assert.equal(result.data.currentContextSummary.obsidianSource, "skipped");
+});
+
+test("pulse review includes obsidian for pulse turns", async () => {
+  const host = createHost();
+  const result = await host.invokeTool("cyberboss_pulse_review", {
+    turnIntent: "pulse",
+    context: "reading",
+    includeObsidianExcerpt: true,
+    includeMemories: false,
+    includeActivities: false,
+  }, {});
+  assert.notEqual(result.data.obsidian.source, "skipped");
+});
+
+test("pulse review flags no open activities on pulse turns", async () => {
+  const host = createHost();
+  const result = await host.invokeTool("cyberboss_pulse_review", {
+    turnIntent: "pulse",
+    context: "quiet afternoon",
+    includeObsidianExcerpt: false,
+    includeMemories: false,
+    includeActivities: true,
+  }, {});
+  assert.equal(result.data.currentContextSummary.hasNoOpenActivities, false);
+  assert.ok(result.data.currentContextSummary.openActivityCount > 0);
+  assert.equal(result.data.currentContextSummary.hasStaleActivity, false);
+});
+
+test("pulse review activity-first recommendedPrivateActions", async () => {
+  const host = createHost();
+  const result = await host.invokeTool("cyberboss_pulse_review", {
+    turnIntent: "user_message",
+    context: "I am working on something",
+    includeObsidianExcerpt: true,
+    includeMemories: false,
+    includeActivities: true,
+  }, {});
+  const actions = result.data.recommendedPrivateActions;
+  assert.ok(actions.length > 0);
+  assert.ok(actions.some((a) => a.includes("activit")), "should include an activity-related action");
+  assert.equal(result.data.obsidian.source, "skipped");
 });

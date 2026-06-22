@@ -105,9 +105,9 @@ async function maybeQueueFollowupAudit(app, audit) {
     .filter((reminder) => reminder.accountId === audit.accountId && reminder.senderId === audit.senderId);
   const baselineIds = new Set(Array.isArray(audit.baselineReminderIds) ? audit.baselineReminderIds : []);
   const hasNewReminder = reminders.some((reminder) => !baselineIds.has(reminder.id));
-  const activityItems = app.projectServices?.activity?.list?.({ includeClosed: true, limit: 50 })?.activities || [];
+  const activityIds = app.projectServices?.activity?.allIds?.() || [];
   const baselineActivityIds = new Set(Array.isArray(audit.baselineActivityIds) ? audit.baselineActivityIds : []);
-  const hasNewActivity = activityItems.some((item) => !baselineActivityIds.has(item.id));
+  const hasNewActivity = activityIds.some((id) => !baselineActivityIds.has(id));
   if (hasNewReminder || hasNewActivity) {
     return false;
   }

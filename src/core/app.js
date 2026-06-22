@@ -893,7 +893,7 @@ class CyberbossApp {
       .listAll()
       .filter((reminder) => reminder.accountId === prepared.accountId && reminder.senderId === prepared.senderId)
       .map((reminder) => reminder.id);
-   const baselineActivityIds = this.projectServices?.activity?.list?.({ includeClosed: true, limit: 50 })?.activities?.map((item) => item.id) || [];
+   const baselineActivityIds = this.projectServices?.activity?.allIds?.() || [];
   this.pendingFollowupAuditByRunKey.set(buildRunKey(threadId, turnId), {
     threadId,
     turnId,

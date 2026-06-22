@@ -101,7 +101,7 @@ const PROJECT_TOOLS = [
     name: "cyberboss_pulse_review",
     description: "Run the default pulse review flow in one step: inspect current context, habit status, an Obsidian signal, current activities, future material worth revisiting, and whether there is a good reason to message the user or set a follow-up reminder.",
     shortHint: "Run the default pulse review flow.",
-    topics: ["pulse", "habit", "obsidian", "pool", "reminder"],
+    topics: ["pulse", "habit", "obsidian", "activity", "reminder"],
     inputSchema: {
       type: "object",
       properties: {
@@ -109,7 +109,7 @@ const PROJECT_TOOLS = [
         context: { type: "string", description: "Current scene, recent conversation context, or what the user seems to be doing." },
         userState: { type: "string", description: "Current inferred user state such as focused, low load, at home, after meal." },
         obsidianQuery: { type: "string", description: "Optional query for targeted Obsidian search. If omitted, a random daily excerpt is preferred." },
-     includeObsidianExcerpt: { type: "boolean", description: "Whether to include a random daily-note excerpt when no query is provided. Defaults to true." },
+     includeObsidianExcerpt: { type: "boolean", description: "Whether to include a random daily-note excerpt when no query is provided. Only applies to pulse and reminder turns; ignored for user_message. Defaults to true." },
       includeMemories: { type: "boolean", description: "Whether to include a few recent durable memories. Defaults to true." },
      includeActivities: { type: "boolean", description: "Whether to include current open activities. Defaults to true." },
      },
@@ -132,49 +132,52 @@ const PROJECT_TOOLS = [
       });
       const { habitStatus, habitSuggestion } = habitSnapshot;
 
+      const isUserMessage = turnIntent === "user_message";
       let obsidian = {
         status: null,
-        source: obsidianQuery ? "search" : "daily_excerpt",
+        source: isUserMessage ? "skipped" : (obsidianQuery ? "search" : "daily_excerpt"),
         result: null,
         error: "",
       };
-      try {
-        obsidian.status = services.obsidian.getStatus();
-        if (obsidian.status?.configured && obsidian.status?.exists) {
-          if (obsidianQuery) {
-            obsidian.result = services.obsidian.search({ query: obsidianQuery, limit: 5 });
-          } else if (includeObsidianExcerpt) {
-            const dailyExcerptExposure = decidePulseExposure({
-              runtimeContextStore,
-              workspaceKey: pulseWorkspaceKey,
-              moduleName: "obsidian_daily_excerpt",
-              version: buildDailyExcerptExposureVersion(),
-            });
-            if (dailyExcerptExposure.mode === "full") {
-              obsidian.result = services.obsidian.randomDailyExcerpt({});
-              obsidian.exposureMode = "full";
-              obsidian.exposureReason = dailyExcerptExposure.reason;
-            } else {
-              obsidian.result = {
-                found: false,
-                suppressed: true,
-                reason: "Daily excerpt suppressed within cooldown. Call cyberboss_obsidian_random_daily_excerpt if a fresh random signal is needed.",
-              };
-              obsidian.exposureMode = "summary";
-              obsidian.exposureReason = dailyExcerptExposure.reason;
+      if (isUserMessage) {
+        obsidian.skipped = true;
+        obsidian.reason = "Obsidian is not included for user_message turns";
+      } else {
+        try {
+          obsidian.status = services.obsidian.getStatus();
+          if (obsidian.status?.configured && obsidian.status?.exists) {
+            if (obsidianQuery) {
+              obsidian.result = services.obsidian.search({ query: obsidianQuery, limit: 5 });
+            } else if (includeObsidianExcerpt) {
+              const dailyExcerptExposure = decidePulseExposure({
+                runtimeContextStore,
+                workspaceKey: pulseWorkspaceKey,
+                moduleName: "obsidian_daily_excerpt",
+                version: buildDailyExcerptExposureVersion(),
+              });
+              if (dailyExcerptExposure.mode === "full") {
+                obsidian.result = services.obsidian.randomDailyExcerpt({});
+                obsidian.exposureMode = "full";
+                obsidian.exposureReason = dailyExcerptExposure.reason;
+              } else {
+                obsidian.result = {
+                  found: false,
+                  suppressed: true,
+                  reason: "Daily excerpt suppressed within cooldown. Call cyberboss_obsidian_random_daily_excerpt if a fresh random signal is needed.",
+                };
+                obsidian.exposureMode = "summary";
+                obsidian.exposureReason = dailyExcerptExposure.reason;
+              }
             }
           }
+        } catch (error) {
+          obsidian.error = error?.message || String(error);
         }
-      } catch (error) {
-        obsidian.error = error?.message || String(error);
-     }
+      }
 
      const activities = includeActivities
-        ? {
-            ...services.activity.list({ limit: activityLimit }),
-            stale: services.activity.reviewStale(),
-          }
-        : { count: 0, activities: [], stale: { count: 0, activities: [] } };
+        ? services.activity.list({ limit: activityLimit })
+        : { count: 0, activities: [] };
 
      const habitExposure = decidePulseExposure({
         runtimeContextStore,
@@ -183,14 +186,18 @@ const PROJECT_TOOLS = [
         version: buildHabitExposureVersion(habitClosureSnapshot),
       });
 
-      // When embedding search is configured, memories use semantic
-     // search keyed off the current context with id-based dedup across recent
-     // pulses instead of the time-based cooldown. Same context repeated will
-     // keep surfacing the same top hits, so dedup suppresses repeats; a new
-     // topic changes the query and naturally surfaces fresh items.
-      let memories;
-      let memoryExposureMode;
-      let memoryExposureReason;
+      // Memories: semantic search (embedding) or token match (fallback),
+      // with id-based dedup across the last PULSE_SHOWN_ROUNDS_WINDOW pulses.
+      const memoryResult = await collectPulseSearchMemories({
+        services,
+        context: args.context,
+        runtimeContextStore,
+        workspaceKey: pulseWorkspaceKey,
+        enabled: includeMemories,
+      });
+      let memories = memoryResult.result;
+      let memoryExposureMode = memoryResult.mode;
+      let memoryExposureReason = memoryResult.reason;
       const summary = buildPulseReviewSummary({
         turnIntent,
         context: args.context,
@@ -285,190 +292,169 @@ const PROJECT_TOOLS = [
       };
     },
   },
- {
- name: "cyberboss_activity_add",
-    description: "Add a current activity that the user intends to do but has not confirmed starting. Use this when the user mentions something they are about to do and the intention should not be lost. The activity starts in state=intended; promote it to a reminder when it becomes stale, or mark it active when the user confirms they have begun.",
-    shortHint: "Add an intended activity.",
+  {
+    name: "cyberboss_activity_add",
+    description: "Add an open activity for something the user said they will do or are doing. A check-back reminder is automatically created and bound to the activity. If other open activities already share a reminder, the new activity joins it. The reminder fires after ~10 minutes and cycles until all open activities are closed. For long-term wishes with no timeline, use memory type=wishseed instead.",
+    shortHint: "Add an open activity with auto check-back reminder.",
     topics: ["activity", "reminder"],
-   inputSchema: {
-     type: "object",
-     required: ["title"],
-     properties: {
-        title: { type: "string", description: "Short action title such as '去洗碗', '收桌面', or '吃葡萄糖酸锌'" },
-        note: { type: "string", description: "Optional context or detail about the activity." },
-        checkBackMinutes: { type: "integer", description: "Optional minutes after which an intended activity is considered stale. Defaults to 30." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args }) {
-      const result = services.activity.add(args);
-     return {
+    inputSchema: {
+      type: "object",
+      required: ["title"],
+      properties: {
+        title: { type: "string", description: "Short action title." },
+        checkBackMinutes: { type: "integer", description: "Minutes before the check-back reminder fires. Only applies when creating a new reminder. Defaults to 10." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args, context }) {
+      const openList = services.activity.list({ limit: 50 });
+      const existingReminderId = openList.activities.find((a) => a.reminderId)?.reminderId || "";
+      let reminderId = existingReminderId;
+      if (!reminderId) {
+        try {
+          const reminder = await services.reminder.create({
+            text: "Activity check-back. Call cyberboss_activity_list to see all open activities. For each, complete it if the user confirmed doing it, or drop it if the user said they won't. If still pending, leave it open. Do not assume completion without confirmation.",
+            delayMinutes: Number.isInteger(args.checkBackMinutes) && args.checkBackMinutes > 0 ? args.checkBackMinutes : 10,
+          }, context);
+          reminderId = reminder.id;
+        } catch (error) {
+          console.warn(`[cyberboss] activity reminder creation failed: ${error?.message || error}`);
+          reminderId = "";
+        }
+      }
+      const result = services.activity.add({ title: args.title, reminderId });
+      return {
         text: `Activity added: ${result.title}`,
-       data: result,
-     };
-   },
- },
- {
-    name: "cyberboss_activity_list",
-    description: "List current open activities (intended and active). Use this to check what the user is currently doing or has said they will do. Pass includeClosed=true to also see done/dropped activities.",
-    shortHint: "List current activities.",
-    topics: ["activity"],
-   inputSchema: {
-     type: "object",
-     properties: {
-        state: { type: "string", description: "Optional filter: intended, active, done, or dropped." },
-        includeClosed: { type: "boolean", description: "Whether to include done/dropped activities. Defaults to false." },
-        limit: { type: "integer", description: "Optional maximum item count. Defaults to 20." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args }) {
-      const result = services.activity.list(args);
-     return {
-        text: `Activities loaded: ${result.count}.`,
-       data: result,
-     };
-   },
- },
- {
-    name: "cyberboss_activity_start",
-    description: "Mark an activity as actively in progress (state=active). Use this when the user confirms they have actually begun the action, not merely intended it. This is the key distinction between going to do and doing.",
-    shortHint: "Mark an activity as started.",
-    topics: ["activity"],
-   inputSchema: {
-     type: "object",
-     required: ["id"],
-     properties: {
-        id: { type: "string", description: "Activity id." },
-        note: { type: "string", description: "Optional context about how it started." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args }) {
-      const result = services.activity.start(args);
-     return {
-        text: `Activity started: ${result.title}`,
-        data: result,
-     };
-   },
- },
- {
-    name: "cyberboss_activity_complete",
-    description: "Mark an activity as done (state=done). Use this when the user confirms the action is completed. This closes the activity loop.",
-    shortHint: "Mark an activity as done.",
-    topics: ["activity"],
-   inputSchema: {
-     type: "object",
-     required: ["id"],
-     properties: {
-        id: { type: "string", description: "Activity id." },
-        note: { type: "string", description: "Optional closure notes." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args }) {
-      const result = services.activity.complete(args);
-     return {
-        text: `Activity completed: ${result.title}`,
-       data: result,
-     };
+        data: { id: result.id, title: result.title, reminderId: result.reminderId, createdAt: result.createdAt },
+      };
+    },
   },
-},
- {
-    name: "cyberboss_activity_drop",
-    description: "Mark an activity as dropped (state=dropped). Use this when the user explicitly says they will not do it, it is no longer relevant, or the intention has clearly lapsed without action.",
-    shortHint: "Mark an activity as dropped.",
+  {
+    name: "cyberboss_activity_list",
+    description: "List current open activities. Use this to check what the user is currently doing or has said they will do.",
+    shortHint: "List open activities.",
+    topics: ["activity"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Optional maximum item count. Defaults to 20." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.activity.list(args);
+      return {
+        text: `Activities loaded: ${result.count}.`,
+        data: {
+          count: result.count,
+          activities: result.activities.map((a) => ({ id: a.id, title: a.title, createdAt: a.createdAt })),
+        },
+      };
+    },
+  },
+  {
+    name: "cyberboss_activity_complete",
+    description: "Mark an open activity as done. Use this when the user confirms the action is completed. If no open activities remain, the linked check-back reminder is cleared automatically.",
+    shortHint: "Mark an activity as done.",
     topics: ["activity"],
     inputSchema: {
       type: "object",
       required: ["id"],
       properties: {
         id: { type: "string", description: "Activity id." },
-        note: { type: "string", description: "Optional reason for dropping." },
       },
       additionalProperties: false,
     },
     async handler({ services, args }) {
-      const result = services.activity.drop(args);
+      const result = services.activity.complete({ id: args.id });
+      if (result.remainingOpenCount === 0 && result.reminderId) {
+        try { services.reminder.complete({ id: result.reminderId }); } catch {}
+      }
       return {
-        text: `Activity dropped: ${result.title}`,
-        data: result,
+        text: `Activity completed: ${result.title}`,
+        data: { id: result.id, title: result.title, remainingOpenCount: result.remainingOpenCount },
       };
     },
   },
   {
-   name: "cyberboss_activity_promote_to_reminder",
-    description: "Promote one activity into a reminder, then drop the activity. Use this when an intended activity has become stale or when the user needs a time-based check-back. The reminder text defaults to the activity title.",
-    shortHint: "Promote an activity to reminder.",
-    topics: ["activity", "reminder"],
-   inputSchema: {
-     type: "object",
-     required: ["id"],
-     properties: {
+    name: "cyberboss_activity_drop",
+    description: "Drop an open activity — the user won't do it, or it's no longer relevant. The activity is removed immediately. If no open activities remain, the linked check-back reminder is cleared automatically.",
+    shortHint: "Drop an open activity.",
+    topics: ["activity"],
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
         id: { type: "string", description: "Activity id." },
-       delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires." },
-       dueAt: { type: "string", description: "Absolute time such as 2026-04-07T21:30+08:00." },
-       userId: { type: "string", description: "Optional explicit WeChat user id." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args, context }) {
-      const item = services.activity.drop({ id: args.id, note: "promoted to reminder" });
-     try {
-       const reminder = await services.reminder.create({
-         text: item.title,
-         delayMinutes: args.delayMinutes,
-         dueAt: args.dueAt,
-         userId: args.userId,
-       }, context);
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.activity.drop({ id: args.id });
+      if (result.remainingOpenCount === 0 && result.reminderId) {
+        try { services.reminder.complete({ id: result.reminderId }); } catch {}
+      }
       return {
-        text: `Activity promoted to reminder: ${item.title}`,
-        data: {
-          item,
-          reminder,
-        },
+        text: `Activity dropped: ${result.title}`,
+        data: { id: result.id, title: result.title, remainingOpenCount: result.remainingOpenCount },
       };
-    } catch (error) {
-      services.activity.add({ title: item.title, note: "restored after failed reminder promotion" });
-      throw error;
-    }
+    },
   },
-},
- {
-   name: "cyberboss_activity_promote_to_memory",
+  {
+    name: "cyberboss_activity_promote_to_memory",
     description: "Promote one activity into a memory (type wishseed or concern), then drop the activity. Use this when an activity reveals a pattern or durable fact worth preserving across days.",
     shortHint: "Promote an activity to memory.",
     topics: ["activity", "memory"],
-   inputSchema: {
-     type: "object",
-     required: ["id"],
-     properties: {
+    inputSchema: {
+      type: "object",
+      required: ["id"],
+      properties: {
         id: { type: "string", description: "Activity id." },
-       kind: { type: "string", description: "wishseed or concern. Defaults to wishseed." },
-     },
-     additionalProperties: false,
-   },
-   async handler({ services, args }) {
-    const item = services.activity.drop({ id: args.id, note: "promoted to memory" });
-    try {
-       const memory = await services.agentMemory.remember({
-         type: normalizeText(args.kind) || "wishseed",
-         subject: item.title,
-         content: item.title,
-      });
+        kind: { type: "string", description: "wishseed or concern. Defaults to wishseed." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const dropped = services.activity.drop({ id: args.id });
+      try {
+        const memory = await services.agentMemory.remember({
+          type: normalizeText(args.kind) || "wishseed",
+          subject: dropped.title,
+          content: dropped.title,
+        });
+        if (dropped.remainingOpenCount === 0 && dropped.reminderId) {
+          try { services.reminder.complete({ id: dropped.reminderId }); } catch {}
+        }
+        return {
+          text: `Activity promoted to memory: ${dropped.title}`,
+          data: { id: dropped.id, title: dropped.title, memory },
+        };
+      } catch (error) {
+        services.activity.add({ title: dropped.title, reminderId: dropped.reminderId });
+        throw error;
+      }
+    },
+  },
+  {
+    name: "cyberboss_activity_list_done",
+    description: "List recently completed activities (done history). Debug use only — not for routine context.",
+    shortHint: "List done activities (debug).",
+    topics: ["activity"],
+    inputSchema: {
+      type: "object",
+      properties: {
+        limit: { type: "integer", description: "Maximum items. Defaults to 5." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.activity.listDone(args);
       return {
-        text: `Activity promoted to memory: ${item.title}`,
-        data: {
-          item,
-           memory,
-        },
-       };
-     } catch (error) {
-      services.activity.add({ title: item.title, note: "restored after failed memory promotion" });
-      throw error;
-     }
-   },
- },
+        text: `Done activities: ${result.count}.`,
+        data: result,
+      };
+    },
+  },
   {
     name: "cyberboss_memory_remember",
     description: "Store a long-term structured memory that should influence future judgment. Do not use this for diary-like logs or tiny one-off details.",
@@ -1256,6 +1242,7 @@ const PROJECT_TOOLS = [
       };
     },
   },
+  ...createHabitToolSpecs(),
 ];
 
 const STATIC_EXTRA_TOOL_NAMES = new WhereaboutsToolHost({ service: null })
@@ -1298,6 +1285,8 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+const ACTIVITY_STALE_MS = 30 * 60 * 1000;
+
 function buildPulseReviewSummary({
   turnIntent,
   context,
@@ -1306,34 +1295,61 @@ function buildPulseReviewSummary({
   habitSuggestion,
   obsidian,
   memories,
- activities,
+  activities,
 }) {
   const incompleteHabits = Array.isArray(habitStatus?.habits)
     ? habitStatus.habits.filter((item) => item?.dailyState === "incomplete")
     : [];
- const openActivities = Array.isArray(activities?.activities) ? activities.activities : [];
- const staleActivities = Array.isArray(activities?.stale?.activities) ? activities.stale.activities : [];
- const durableMemories = Array.isArray(memories?.memories) ? memories.memories : [];
+  const openActivities = Array.isArray(activities?.activities) ? activities.activities : [];
+  const durableMemories = Array.isArray(memories?.memories) ? memories.memories : [];
+
+  // Activity analysis — first priority regardless of turn intent.
+  const isUserMessage = turnIntent === "user_message";
+  const oldestActivity = openActivities.length
+    ? openActivities.reduce((oldest, item) => {
+        const itemMs = Date.parse(item?.createdAt || 0) || 0;
+        const oldestMs = Date.parse(oldest?.createdAt || 0) || 0;
+        return itemMs < oldestMs ? item : oldest;
+      })
+    : null;
+  const oldestActivityAgeMs = oldestActivity
+    ? Math.max(0, Date.now() - (Date.parse(oldestActivity.createdAt) || 0))
+    : 0;
+  const oldestActivityAgeMinutes = Math.floor(oldestActivityAgeMs / 60000);
+  const hasStaleActivity = openActivities.length > 0 && oldestActivityAgeMs >= ACTIVITY_STALE_MS;
+  const hasNoOpenActivities = openActivities.length === 0;
 
   const currentContextSummary = {
     turnIntent,
     context: normalizeText(context),
     userState: normalizeText(userState),
-   incompleteHabitCount: incompleteHabits.length,
-   openActivityCount: openActivities.length,
-   staleActivityCount: staleActivities.length,
-   memoryCount: durableMemories.length,
-   obsidianSource: normalizeText(obsidian?.source) || "none",
+    openActivityCount: openActivities.length,
+    oldestActivityAgeMinutes,
+    hasStaleActivity,
+    hasNoOpenActivities,
+    incompleteHabitCount: incompleteHabits.length,
+    memoryCount: durableMemories.length,
+    obsidianSource: normalizeText(obsidian?.source) || "none",
     obsidianFound: detectObsidianSignal(obsidian),
   };
 
-  const shouldContactForHabit = habitSuggestion?.shouldContactUser === true;
+  // Priority: activity first, then reminder, then habit, then obsidian.
+  const shouldContactForActivity = (turnIntent === "pulse" && (hasStaleActivity || hasNoOpenActivities))
+    || (turnIntent === "reminder" && hasStaleActivity);
   const shouldContactForReminder = turnIntent === "reminder";
+  const shouldContactForHabit = habitSuggestion?.shouldContactUser === true;
   const hasInterestingObsidianSignal = detectObsidianSignal(obsidian);
-  const shouldContactUser = shouldContactForReminder || shouldContactForHabit;
+  const shouldContactUser = shouldContactForActivity || shouldContactForReminder || shouldContactForHabit;
   const topIncompleteHabit = incompleteHabits[0] || null;
 
   const reasons = [];
+  if (shouldContactForActivity) {
+    if (hasNoOpenActivities) {
+      reasons.push("no open activities tracked; ask the user what they are doing or about to do");
+    } else if (hasStaleActivity) {
+      reasons.push(`an activity has been open for ${oldestActivityAgeMinutes} minutes; check whether it is still active or should be completed or dropped`);
+    }
+  }
   if (shouldContactForReminder) {
     reasons.push("a reminder is due now");
   }
@@ -1343,10 +1359,7 @@ function buildPulseReviewSummary({
   if (!reasons.length && hasInterestingObsidianSignal) {
     reasons.push("Obsidian contains a potentially relevant signal, but it may only justify private review");
   }
- if (!reasons.length && staleActivities.length) {
-   reasons.push("there are stale intended activities worth a check-back");
- }
- if (!reasons.length) {
+  if (!reasons.length) {
     reasons.push("no strong interruption-worthy signal was found");
   }
 
@@ -1357,6 +1370,19 @@ function buildPulseReviewSummary({
     reminderText: "",
     suggestedDelayMinutes: null,
   };
+
+  // Activity-first private actions.
+  if (hasStaleActivity) {
+    recommendedPrivateActions.push(`review the oldest open activity "${oldestActivity?.title || ""}" (open for ${oldestActivityAgeMinutes} min); complete, drop, or check with the user`);
+  }
+  if (hasNoOpenActivities && isUserMessage) {
+    recommendedPrivateActions.push("consider asking the user what they are working on or about to do, and capture it as an activity");
+  }
+  if (openActivities.length > 0 && !hasStaleActivity) {
+    recommendedPrivateActions.push("review open activities and complete or drop any that are resolved");
+  }
+
+  // Habit follow-up.
   if (!shouldContactForReminder && incompleteHabits.length > 0) {
     followupOpportunity = {
       shouldSetReminder: true,
@@ -1369,16 +1395,16 @@ function buildPulseReviewSummary({
       suggestedDelayMinutes: shouldContactForHabit ? 90 : 180,
     };
   }
-  if (hasInterestingObsidianSignal && !shouldContactUser) {
-    recommendedPrivateActions.push("review the Obsidian result before deciding whether to message the user");
-  }
   if (followupOpportunity.shouldSetReminder && !shouldContactForReminder) {
     recommendedPrivateActions.push("set a reminder for today's incomplete habit instead of letting it disappear");
   }
- if (staleActivities.length) {
-   recommendedPrivateActions.push("promote stale intended activities to reminders or mark them done/dropped");
- }
- if (!recommendedPrivateActions.length) {
+
+  // Obsidian review (only surfaced for non-user-message turns).
+  if (hasInterestingObsidianSignal && !shouldContactUser && !isUserMessage) {
+    recommendedPrivateActions.push("review the Obsidian result before deciding whether to message the user");
+  }
+
+  if (!recommendedPrivateActions.length) {
     recommendedPrivateActions.push("stay silent and wait for a better trigger");
   }
 
@@ -1413,13 +1439,12 @@ function detectObsidianSignal(obsidian) {
 
 const PULSE_DETAIL_COOLDOWN_MS = 60 * 60 * 1000;
 
-// Embedding-search pulse path: take the top-N most relevant items per pulse,
-// but skip any id already surfaced within the last PULSE_SHOWN_ROUNDS_WINDOW
-// pulses. Same context repeats -> same candidates -> all deduped -> nothing new
-// returned; a new topic -> new query -> fresh ids. This replaces the
-// time-based cooldown for memories when embedding is configured.
-const PULSE_SEARCH_TOP = 5;
-const PULSE_SEARCH_CANDIDATE_LIMIT = 10;
+// Pulse memory path: search top PULSE_SEARCH_CANDIDATE_LIMIT items, skip any id
+// already surfaced within the last PULSE_SHOWN_ROUNDS_WINDOW pulses, then return
+// the top PULSE_SEARCH_TOP. When embedding is configured the search is semantic;
+// otherwise it degrades to token/substring matching. Dedup applies to both paths.
+const PULSE_SEARCH_TOP = 3;
+const PULSE_SEARCH_CANDIDATE_LIMIT = 6;
 const PULSE_SHOWN_ROUNDS_WINDOW = 10;
 
 function getShownIdSet(runtimeContextStore, workspaceKey, moduleName) {
@@ -1451,9 +1476,10 @@ async function collectPulseSearchMemories({
     return { mode: "disabled", result: { count: 0, memories: [] }, reason: "module disabled for this pulse" };
   }
   const query = normalizeText(context);
+  const embeddingConfigured = services.embedding?.isConfigured?.() === true;
   const result = await services.agentMemory.search({
     query,
-    limit: PULSE_SEARCH_CANDIDATE_LIMIT,
+    limit: embeddingConfigured ? PULSE_SEARCH_CANDIDATE_LIMIT : PULSE_SEARCH_TOP,
     includeArchived: false,
   });
   const shownSet = getShownIdSet(runtimeContextStore, workspaceKey, "memories");
@@ -1467,8 +1493,9 @@ async function collectPulseSearchMemories({
     "memories",
     picked.map((item) => normalizeText(item?.id)),
   );
+  const mode = embeddingConfigured ? "semantic" : "token";
   return {
-    mode: "search",
+    mode,
     result: {
       filePath: result?.filePath || "",
       query: result?.query || query,
@@ -1476,8 +1503,8 @@ async function collectPulseSearchMemories({
       memories: picked,
     },
     reason: picked.length
-      ? "embedding search top-3 after id dedup"
-      : "no new memories matched after dedup",
+      ? `${mode} search top-${PULSE_SEARCH_TOP} after id dedup`
+      : `no new memories matched after dedup (${mode})`,
   };
 }
 
@@ -1579,28 +1606,6 @@ function applyHabitPulseExposure(habitStatus, exposure) {
   };
 }
 
-function applyMemoryPulseExposure(memories, exposure) {
-  if (exposure?.mode !== "summary") {
-    return {
-      ...memories,
-      exposureMode: exposure?.mode || "full",
-      exposureReason: exposure?.reason || "",
-    };
-  }
-  const items = Array.isArray(memories?.memories) ? memories.memories : [];
-  return {
-    filePath: memories?.filePath || "",
-    count: Number(memories?.count) || items.length,
-    memories: [],
-    summary: {
-      subjects: items.slice(0, 3).map((item) => normalizeText(item?.subject)).filter(Boolean),
-      types: uniqueNonEmpty(items.slice(0, 5).map((item) => normalizeText(item?.type))),
-    },
-    exposureMode: "summary",
-    exposureReason: exposure?.reason || "",
-    detailsSuppressed: true,
-  };
-}
 function summarizeHabitStatus(habits) {
   const items = Array.isArray(habits) ? habits : [];
   const summary = {
@@ -1627,10 +1632,6 @@ function summarizeHabitStatus(habits) {
     }))
     .filter((item) => item.habitId || item.title);
   return summary;
-}
-
-function uniqueNonEmpty(values) {
-  return [...new Set((Array.isArray(values) ? values : []).filter(Boolean))];
 }
 
 function normalizeHabitSuggestionForPulse(habitSuggestion) {
