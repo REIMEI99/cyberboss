@@ -482,6 +482,11 @@ class CyberbossApp {
         accountId: prepared.accountId,
         senderId: prepared.senderId,
       });
+      if (normalizeText(prepared.turnIntent) === "user_message") {
+        this.runtimeContextStore?.setPulseExposureModule?.(workspaceRoot, "contactGapFloor", {
+          lastUserMessageAt: prepared.receivedAt || new Date().toISOString(),
+        });
+      }
       this.turnGateStore.attachThread(pendingScopeKey, turn.threadId);
       const replyTarget = {
         userId: prepared.senderId,

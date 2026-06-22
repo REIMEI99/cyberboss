@@ -64,6 +64,7 @@ function createProjectTooling(config, options = {}) {
   const toolHost = new ProjectToolHost({
     services,
     runtimeContextStore,
+    config,
   });
   return {
     services,

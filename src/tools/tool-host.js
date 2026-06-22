@@ -8,9 +8,10 @@ const {
 const { createHabitToolSpecs } = require("../habit/habit-tool-specs");
 
 class ProjectToolHost {
-  constructor({ services, runtimeContextStore }) {
+  constructor({ services, runtimeContextStore, config = null }) {
     this.services = services;
     this.runtimeContextStore = runtimeContextStore;
+    this.config = config;
     this.extraToolHosts = createExtraToolHosts(services);
   }
 
@@ -44,6 +45,7 @@ class ProjectToolHost {
         args: normalizedArgs,
         context: resolvedContext,
         runtimeContextStore: this.runtimeContextStore,
+        config: this.config,
       });
     }
     for (const host of this.extraToolHosts) {
@@ -115,7 +117,7 @@ const PROJECT_TOOLS = [
      },
      additionalProperties: false,
    },
-   async handler({ services, args, context, runtimeContextStore }) {
+   async handler({ services, args, context, runtimeContextStore, config }) {
      const turnIntent = normalizeTurnIntent(args.turnIntent);
     const includeObsidianExcerpt = args.includeObsidianExcerpt !== false;
     const includeMemories = args.includeMemories !== false;
@@ -198,6 +200,11 @@ const PROJECT_TOOLS = [
       let memories = memoryResult.result;
       let memoryExposureMode = memoryResult.mode;
       let memoryExposureReason = memoryResult.reason;
+      const contactGapFloor = evaluateContactGapFloor({
+        config,
+        runtimeContextStore,
+        workspaceRoot: pulseWorkspaceKey,
+      });
       const summary = buildPulseReviewSummary({
         turnIntent,
         context: args.context,
@@ -207,6 +214,7 @@ const PROJECT_TOOLS = [
        obsidian,
       memories,
       activities,
+      contactGapFloor,
    });
 
     return {
@@ -221,6 +229,7 @@ const PROJECT_TOOLS = [
           obsidian,
         memories,
         activities,
+        contactGapFloor,
         messageOpportunity: summary.messageOpportunity,
           followupOpportunity: summary.followupOpportunity,
           recommendedPrivateActions: summary.recommendedPrivateActions,
@@ -1328,6 +1337,71 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function evaluateContactGapFloor({ config, runtimeContextStore, workspaceRoot }) {
+  const maxGapMinutes = Number.parseInt(String(config?.maxContactGapMinutes || ""), 10);
+  const thresholdMinutes = Number.isFinite(maxGapMinutes) && maxGapMinutes > 0 ? maxGapMinutes : 60;
+  const floorState = runtimeContextStore?.getPulseExposureModule?.(workspaceRoot, "contactGapFloor");
+  const lastUserMessageAt = normalizeText(floorState?.lastUserMessageAt);
+  if (!lastUserMessageAt) {
+    return { triggered: false, gapMinutes: null, quietHours: false, reason: "no user message recorded yet" };
+  }
+  const lastMs = Date.parse(lastUserMessageAt);
+  if (!Number.isFinite(lastMs)) {
+    return { triggered: false, gapMinutes: null, quietHours: false, reason: "invalid last user message timestamp" };
+  }
+  const gapMs = Math.max(0, Date.now() - lastMs);
+  const gapMinutes = Math.floor(gapMs / 60000);
+  const inQuietHours = isWithinQuietHours(config?.quietHoursStart, config?.quietHoursEnd);
+  if (inQuietHours) {
+    return { triggered: false, gapMinutes, quietHours: true, reason: `quiet hours active (gap ${gapMinutes} min)` };
+  }
+  if (gapMinutes >= thresholdMinutes) {
+    return {
+      triggered: true,
+      gapMinutes,
+      quietHours: false,
+      reason: `user has been silent for ${gapMinutes} minutes (threshold ${thresholdMinutes} min); contact is required`,
+    };
+  }
+  return { triggered: false, gapMinutes, quietHours: false, reason: `gap ${gapMinutes} min below threshold ${thresholdMinutes} min` };
+}
+
+function isWithinQuietHours(quietHoursStart, quietHoursEnd, now = new Date()) {
+  const start = parseHourMinute(quietHoursStart);
+  const end = parseHourMinute(quietHoursEnd);
+  if (start === null || end === null) {
+    return false;
+  }
+  const localTime = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(now);
+  const parts = localTime.split(":").map(Number);
+  const currentMinutes = parts[0] * 60 + parts[1];
+  if (start <= end) {
+    return currentMinutes >= start && currentMinutes < end;
+  }
+  return currentMinutes >= start || currentMinutes < end;
+}
+
+function parseHourMinute(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+  const hour = Number.parseInt(match[1], 10);
+  const minute = Number.parseInt(match[2], 10);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+  return hour * 60 + minute;
+}
+
 const ACTIVITY_STALE_MS = 30 * 60 * 1000;
 
 function buildPulseReviewSummary({
@@ -1339,6 +1413,7 @@ function buildPulseReviewSummary({
   obsidian,
   memories,
   activities,
+  contactGapFloor = null,
 }) {
   const incompleteHabits = Array.isArray(habitStatus?.habits)
     ? habitStatus.habits.filter((item) => item?.dailyState === "incomplete")
@@ -1374,6 +1449,9 @@ function buildPulseReviewSummary({
     memoryCount: durableMemories.length,
     obsidianSource: normalizeText(obsidian?.source) || "none",
     obsidianFound: detectObsidianSignal(obsidian),
+    contactGapMinutes: contactGapFloor?.gapMinutes ?? null,
+    contactGapFloorTriggered: contactGapFloor?.triggered ?? false,
+    quietHoursActive: contactGapFloor?.quietHours ?? false,
   };
 
   // Priority: activity first, then reminder, then habit, then obsidian.
@@ -1381,8 +1459,9 @@ function buildPulseReviewSummary({
     || (turnIntent === "reminder" && hasStaleActivity);
   const shouldContactForReminder = turnIntent === "reminder";
   const shouldContactForHabit = habitSuggestion?.shouldContactUser === true;
+  const shouldContactForFloor = contactGapFloor?.triggered === true;
   const hasInterestingObsidianSignal = detectObsidianSignal(obsidian);
-  const shouldContactUser = shouldContactForActivity || shouldContactForReminder || shouldContactForHabit;
+  const shouldContactUser = shouldContactForActivity || shouldContactForReminder || shouldContactForHabit || shouldContactForFloor;
   const topIncompleteHabit = incompleteHabits[0] || null;
 
   const reasons = [];
@@ -1398,6 +1477,9 @@ function buildPulseReviewSummary({
   }
   if (shouldContactForHabit) {
     reasons.push(normalizeText(habitSuggestion?.reason) || "a habit nudge looks appropriate");
+  }
+  if (shouldContactForFloor) {
+    reasons.push(normalizeText(contactGapFloor?.reason) || "the user has been silent too long; a check-in is required");
   }
   if (!reasons.length && hasInterestingObsidianSignal) {
     reasons.push("Obsidian contains a potentially relevant signal, but it may only justify private review");
@@ -1423,6 +1505,9 @@ function buildPulseReviewSummary({
   }
   if (openActivities.length > 0 && !hasStaleActivity) {
     recommendedPrivateActions.push("review open activities and complete or drop any that are resolved");
+  }
+  if (shouldContactForFloor) {
+    recommendedPrivateActions.push(`the user has been silent for ${contactGapFloor?.gapMinutes ?? "many"} minutes; send a brief check-in grounded in current activities or context`);
   }
 
   // Habit follow-up.

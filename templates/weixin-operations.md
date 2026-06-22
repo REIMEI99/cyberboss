@@ -114,6 +114,8 @@ Default order:
 3. review any Obsidian signal
 4. review memory items (round-cooled search)
 5. decide whether one short useful message is timely - usually if user haven't sent a message for a while, you can write a short follow-up message
+   - If `contactGapFloorTriggered` is true in the pulse review output, contact is mandatory: the user has been silent past the configured gap. Send a short check-in grounded in current activities or context.
+   - If `quietHoursActive` is true, the floor is suppressed and you may stay silent.
 6. if not, do one small private action
 7. make a follow-up decision
 
