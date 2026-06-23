@@ -129,7 +129,7 @@ function buildReminderSystemTrigger(reminder, config) {
   if (!body) {
     return `A due reminder fired for ${userName}. Act now. This reminder stays active until explicit completion, and the queue has already scheduled the next check in about ${effectiveFollowupDelayMinutes} minutes unless you later clear it.`;
   }
-  return `A due reminder fired for ${userName}. Reminder: ${body}\nThis reminder stays active until explicit completion, and the queue has already scheduled the next check in about ${effectiveFollowupDelayMinutes} minutes unless you later clear it.\nDo not assume the user already acted just because the reminder fired.\nIf recent context clearly shows the user already did it, list active reminders and clear the matching one. Otherwise treat this as an active follow-up.`;
+  return `A due reminder fired for ${userName}. Reminder: ${body}\nThis reminder stays active until explicit completion, and the queue has already scheduled the next check in about ${effectiveFollowupDelayMinutes} minutes unless you later clear it.\nDo not assume the user already acted just because the reminder fired.\nYour default action for a due reminder is to send a message to the user. Only return silent if the user just told you in the current turn that the task is done. If recent context clearly shows the user already did it, list active reminders and clear the matching one. Otherwise, send a brief natural message to check in with the user about this reminder.`;
 }
 
 function resolveReminderFollowupDelayMs(reminder) {

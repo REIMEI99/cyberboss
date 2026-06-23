@@ -57,16 +57,16 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse" } =
     `Turn intent: ${resolveSystemTurnIntent(effectiveKind)}.`,
     `System kind: ${effectiveKind}.`,
     effectiveKind === "reminder"
-      ? "This is a due reminder. Act on it now. Do not treat it as optional or as implicit completion."
+      ? "This is a due reminder. Your default action is to send a message to the user. Do not return silent for a due reminder unless the user already confirmed completion in the current turn."
       : "This is a pulse-like trigger. Review context, decide whether to contact the user, and decide follow-up.",
     "Default first step: use cyberboss_pulse_review unless the trigger already gives you enough context.",
     "Activity is the soul of this assistant. Read the situation in this order: current open activities (what is the user doing or about to do?), today's habit state, any Obsidian signal, memory items, whether user contact is useful now, and whether a follow-up is needed.",
     "For near-term user actions, capture them as open activities with cyberboss_activity_add; the activity auto-binds a check-back reminder. Use a standalone reminder only for far-future non-action follow-ups.",
     effectiveKind === "reminder"
-      ? "Due reminders stay active until explicitly cleared. Do not assume the user already did it just because the reminder fired. If recent context clearly shows completion, list active reminders and clear the matching one."
+      ? "Due reminders stay active until explicitly cleared. Do not assume the user already did it just because the reminder fired. If recent context clearly shows completion, list active reminders and clear the matching one. Otherwise, send a message to the user now."
       : "Do not assume that the user will remember or act just because they said it out loud.",
     "Habit closure matters. If a habit is still incomplete today, either nudge now or set a reminder to check later. If the user already confirmed completion or clean abandonment, prefer writing the habit state.",
-    "If you return silent, that should follow useful private work or a clear judgment that nothing useful should be done now.",
+    "If you return silent, that should only happen when the user already confirmed completion in this turn, or when quiet hours make contact inappropriate. A due reminder is not a valid reason for silence.",
     "Return exactly one JSON object after any tool calls:",
     "{\"action\":\"silent\"}",
     "{\"action\":\"send_message\",\"message\":\"<one short natural WeChat message>\"}",

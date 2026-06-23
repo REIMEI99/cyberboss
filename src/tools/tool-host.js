@@ -308,12 +308,12 @@ const PROJECT_TOOLS = [
     topics: ["activity", "reminder"],
     inputSchema: {
       type: "object",
-      required: ["title"],
+      required: ["title", "checkBackMinutes"],
       properties: {
         title: { type: "string", description: "Short title for the activity or work sequence." },
         items: { type: "array", items: { type: "string" }, description: "Optional list of specific items in this work sequence. Omit if the title alone is sufficient." },
-        checkBackMinutes: { type: "integer", description: "Minutes before the first check-back. Defaults to 10 for near-term actions; set higher for later activities." },
-        followupDelayMinutes: { type: "integer", description: "Minutes between repeated check-backs after the first fire. Defaults to checkBackMinutes if omitted. Set higher for non-urgent activities." },
+        checkBackMinutes: { type: "integer", description: "REQUIRED. Minutes before the first check-back fires. You must choose a value based on when the user will plausibly be doing this: 10-15 for imminent actions, 30-60 for later today, 120-240 for tomorrow. Setting this too low causes unnecessary pings." },
+        followupDelayMinutes: { type: "integer", description: "Minutes between repeated check-backs after the first fire. Usually the same as checkBackMinutes. Set higher (e.g. 60-240) for non-urgent activities to avoid pestering." },
       },
       additionalProperties: false,
     },
@@ -323,7 +323,7 @@ const PROJECT_TOOLS = [
       try {
         const checkBackMinutes = Number.isInteger(args.checkBackMinutes) && args.checkBackMinutes > 0 ? args.checkBackMinutes : 10;
         const reminder = await services.reminder.create({
-          text: `Activity check-back: ${activity.title}. Call cyberboss_activity_list to see all open activities. For each, complete it if the user confirmed doing it, or drop it if the user said they won't. If still pending, leave it open. Do not assume completion without confirmation.`,
+          text: `Check-back: ${activity.title}. Send a message to the user asking whether they have started or finished this. Do not assume completion without their confirmation. If they confirm completion, use cyberboss_activity_complete and cyberboss_reminder_complete. If they say they will not do it, use cyberboss_activity_drop and cyberboss_reminder_complete. Do not stay silent - this reminder exists to reach out to the user.`,
           delayMinutes: checkBackMinutes,
           followupDelayMinutes: Number.isInteger(args.followupDelayMinutes) && args.followupDelayMinutes > 0 ? args.followupDelayMinutes : undefined,
           activityId: activity.id,
@@ -692,9 +692,9 @@ const PROJECT_TOOLS = [
       required: ["text"],
       properties: {
         text: { type: "string", description: "Reminder text that preserves the future follow-up hook." },
-        delayMinutes: { type: "integer", description: "Minutes from now before the reminder fires." },
+        delayMinutes: { type: "integer", description: "REQUIRED (or use dueAt). Minutes from now before the reminder fires. Choose based on urgency: 10-30 for near-term, 60-240 for later today, 1440+ for tomorrow or beyond." },
         dueAt: { type: "string", description: "Absolute time such as 2026-04-07T21:30+08:00." },
-        followupDelayMinutes: { type: "integer", description: "Minutes between repeated reminder checks after the first fire. Defaults to a short sticky cadence." },
+        followupDelayMinutes: { type: "integer", description: "Minutes between repeated fires after the first one. Set to match delayMinutes for consistent cadence, or higher to avoid pestering." },
         userId: { type: "string", description: "Optional explicit WeChat user id." },
       },
       additionalProperties: false,
@@ -1499,15 +1499,28 @@ function buildPulseReviewSummary({
     suggestedDelayMinutes: null,
   };
 
-  // Activity-first private actions.
+  // Activity-first recommended actions.
+  // For reminder turns, frame as user-facing contact, not internal review.
+  const isReminder = turnIntent === "reminder";
   if (hasStaleActivity) {
-    recommendedPrivateActions.push(`review the oldest open activity "${oldestActivity?.title || ""}" (open for ${oldestActivityAgeMinutes} min); complete, drop, or check with the user`);
+    if (isReminder) {
+      recommendedPrivateActions.push(`send a message to the user about the open activity "${oldestActivity?.title || ""}" (open for ${oldestActivityAgeMinutes} min); ask whether it is done, in progress, or abandoned. Do not stay silent.`);
+    } else {
+      recommendedPrivateActions.push(`review the oldest open activity "${oldestActivity?.title || ""}" (open for ${oldestActivityAgeMinutes} min); complete, drop, or check with the user`);
+    }
   }
   if (hasNoOpenActivities && isUserMessage) {
     recommendedPrivateActions.push("consider asking the user what they are working on or about to do, and capture it as an activity");
   }
   if (openActivities.length > 0 && !hasStaleActivity) {
-    recommendedPrivateActions.push("review open activities and complete or drop any that are resolved");
+    if (isReminder) {
+      recommendedPrivateActions.push(`send a brief message to the user checking on their open activity "${openActivities[0]?.title || ""}"; do not assume it is done without confirmation`);
+    } else {
+      recommendedPrivateActions.push("review open activities and complete or drop any that are resolved");
+    }
+  }
+  if (hasNoOpenActivities && isReminder) {
+    recommendedPrivateActions.push("send a brief check-in message to the user; ask what they are working on or about to do");
   }
   if (shouldContactForFloor) {
     recommendedPrivateActions.push(`the user has been silent for ${contactGapFloor?.gapMinutes ?? "many"} minutes; send a brief check-in grounded in current activities or context`);
@@ -1536,7 +1549,11 @@ function buildPulseReviewSummary({
   }
 
   if (!recommendedPrivateActions.length) {
-    recommendedPrivateActions.push("stay silent and wait for a better trigger");
+    if (isReminder) {
+      recommendedPrivateActions.push("send a brief message to the user; this is a due reminder and should not be ignored");
+    } else {
+      recommendedPrivateActions.push("stay silent and wait for a better trigger");
+    }
   }
 
   return {

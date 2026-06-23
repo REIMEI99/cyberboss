@@ -422,6 +422,7 @@ test("tool host exposes activity tools", async () => {
   const host = createHost();
   const addResult = await host.invokeTool("cyberboss_activity_add", {
     title: "test-activity",
+    checkBackMinutes: 15,
   }, {});
   const listResult = await host.invokeTool("cyberboss_activity_list", {}, {});
   const completeResult = await host.invokeTool("cyberboss_activity_complete", {
