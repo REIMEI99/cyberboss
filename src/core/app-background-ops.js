@@ -65,10 +65,11 @@ async function flushDueReminders(app, account) {
 
   for (const reminder of dueReminders) {
     try {
-      app.reminderQueue.defer({
+      const deferred = app.reminderQueue.defer({
         id: reminder.id,
         dueAtMs: Date.now() + resolveReminderFollowupDelayMs(reminder),
       });
+      console.log(`[cyberboss] reminder fired id=${reminder.id} triggerCount=${deferred.triggerCount} nextFire=${Math.round(resolveReminderFollowupDelayMs(reminder) / 60000)}m text=${JSON.stringify(reminder.text.slice(0, 60))}`);
     } catch {
       try {
         app.reminderQueue.defer({

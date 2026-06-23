@@ -358,6 +358,7 @@ class StreamDelivery {
       await this.sendSystemReply(state, resolved.message);
       this.markAllItemsSent(state);
       this.completedSystemReplyOutcomeByRunKey.set(state.runKey, { kind: "send_message" });
+      console.log(`[cyberboss] pulse response send_message thread=${state.threadId} preview=${JSON.stringify(resolved.message.slice(0, 80))}`);
     }).catch((error) => {
       console.error(`[cyberboss] failed to deliver system reply thread=${state.threadId}: ${error.message}`);
     });

@@ -983,7 +983,9 @@ class CyberbossApp {
     if (this.isTurnDispatchBlocked(bindingKey, workspaceRoot)) {
       return false;
     }
-    return this.dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared });
+    const dispatched = await this.dispatchPreparedTurn({ bindingKey, workspaceRoot, prepared });
+    console.log(`[cyberboss] system message dispatched id=${message.id} kind=${prepared.systemKind || "pulse"} senderId=${message.senderId}`);
+    return dispatched;
   }
 
   async dispatchChannelCommand(normalized, command) {
