@@ -239,12 +239,11 @@ test("orphan reminder with check-back text gets completed, not activity-created"
   assert.equal(service.list({ limit: 50 }).count, 0);
 });
 
-test("orphan reminder with user text creates activity and binds", () => {
+test("standalone reminder can be replaced by a new activity-reminder pair", () => {
   const { service, stateDir } = createActivityService();
   const reminderStore = createReminderStore(stateDir);
 
-  // User-created reminder: "remind me to call mom" — no activityId
-  const reminder = reminderStore.enqueue({
+  const oldReminder = reminderStore.enqueue({
     id: "rem-orphan-1",
     accountId: "acct",
     senderId: "user",
@@ -253,20 +252,26 @@ test("orphan reminder with user text creates activity and binds", () => {
     dueAtMs: Date.now() - 1_000,
     createdAt: "2026-06-22T00:00:00.000Z",
   });
-  assert.equal(reminder.activityId, "");
+  assert.equal(oldReminder.activityId, "");
 
-  // Simulate reconcileOrphanReminder logic
-  const openActivities = service.list({ limit: 50 }).activities;
-  const hasBoundActivity = openActivities.some((a) => a.reminderId === reminder.id);
-  assert.equal(hasBoundActivity, false);
+  const activity = service.add({ title: "call mom", reminderId: "" });
+  const newReminder = reminderStore.enqueue({
+    id: "rem-activity-1",
+    accountId: "acct",
+    senderId: "user",
+    contextToken: "ctx",
+    text: "Check-back: call mom",
+    dueAtMs: Date.now() + 10 * 60_000,
+    createdAt: "2026-06-22T00:00:00.000Z",
+    activityId: activity.id,
+  });
+  service.bindReminder({ id: activity.id, reminderId: newReminder.id });
+  reminderStore.complete({ id: oldReminder.id });
 
-  // Create activity from reminder text
-  const activity = service.add({ title: "call mom", reminderId: reminder.id });
-  reminderStore.bindActivity({ id: reminder.id, activityId: activity.id });
-
-  // Verify binding
-  const updatedReminder = reminderStore.listAll()[0];
-  assert.equal(updatedReminder.activityId, activity.id);
+  const reminders = reminderStore.listAll();
+  assert.equal(reminders.length, 1);
+  assert.equal(reminders[0].id, "rem-activity-1");
+  assert.equal(reminders[0].activityId, activity.id);
   const updatedActivity = service.list({ limit: 50 }).activities[0];
-  assert.equal(updatedActivity.reminderId, "rem-orphan-1");
+  assert.equal(updatedActivity.reminderId, "rem-activity-1");
 });

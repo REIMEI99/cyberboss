@@ -40,7 +40,7 @@ function readConfig() {
     habitStateFile: path.join(stateDir, "habit-state.json"),
     habitHeatmapFile: path.join(stateDir, "habit-heatmap.json"),
     habitDayResetHour: readIntEnv("CYBERBOSS_HABIT_DAY_RESET_HOUR") || 5,
-    maxContactGapMinutes: readIntEnv("CYBERBOSS_MAX_CONTACT_GAP_MINUTES") || 60,
+    maxContactGapMinutes: readIntEnv("CYBERBOSS_MAX_CONTACT_GAP_MINUTES") || 45,
     quietHoursStart: readTextEnv("CYBERBOSS_QUIET_HOURS_START") || "",
     quietHoursEnd: readTextEnv("CYBERBOSS_QUIET_HOURS_END") || "",
     timelineScreenshotQueueFile: path.join(stateDir, "timeline-screenshot-queue.json"),

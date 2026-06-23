@@ -23,13 +23,15 @@ function baseMessage(overrides = {}) {
   };
 }
 
-test("system message queue preserves source and expiresAt metadata", () => {
+test("system message queue preserves source, kind and expiresAt metadata", () => {
   const store = createStore();
   const queued = store.enqueue(baseMessage({
+    kind: "pulse",
     source: "checkin",
     expiresAt: "2026-06-18T17:30:00.000Z",
   }));
 
+  assert.equal(queued.kind, "pulse");
   assert.equal(queued.source, "checkin");
   assert.equal(queued.expiresAt, "2026-06-18T17:30:00.000Z");
   assert.equal(store.hasPendingForAccount("account-1"), true);

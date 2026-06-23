@@ -118,6 +118,7 @@ function normalizeSystemMessage(message) {
   const text = normalizeText(message.text);
   const createdAt = normalizeIsoTime(message.createdAt);
   const source = normalizeText(message.source);
+  const kind = normalizeText(message.kind);
   const expiresAt = normalizeIsoTime(message.expiresAt);
 
   if (!id || !accountId || !senderId || !workspaceRoot || !text) {
@@ -134,6 +135,9 @@ function normalizeSystemMessage(message) {
   };
   if (source) {
     normalized.source = source;
+  }
+  if (kind) {
+    normalized.kind = kind;
   }
   if (expiresAt) {
     normalized.expiresAt = expiresAt;

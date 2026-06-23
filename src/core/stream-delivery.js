@@ -3,12 +3,13 @@ const { sanitizeProtocolLeakText } = require("../adapters/runtime/codex/protocol
 const CURRENT_REPLY_HEADER = "===== 本轮模型回复 =====";
 
 class StreamDelivery {
-  constructor({ channelAdapter, sessionStore, runtimeId = "", onDeferredSystemReply, systemReplyRetryScheduleMs, sameTokenRetryDelayMs }) {
+  constructor({ channelAdapter, sessionStore, runtimeId = "", onDeferredSystemReply, onOutboundMessageSent, systemReplyRetryScheduleMs, sameTokenRetryDelayMs }) {
     this.channelAdapter = channelAdapter;
     this.sessionStore = sessionStore;
     this.runtimeId = normalizeRuntimeId(runtimeId);
     this.systemReplyPolicy = createSystemReplyPolicy(this.runtimeId);
     this.onDeferredSystemReply = typeof onDeferredSystemReply === "function" ? onDeferredSystemReply : null;
+    this.onOutboundMessageSent = typeof onOutboundMessageSent === "function" ? onOutboundMessageSent : null;
     this.systemReplyRetryScheduleMs = Array.isArray(systemReplyRetryScheduleMs) && systemReplyRetryScheduleMs.length
       ? systemReplyRetryScheduleMs.map((value) => Number(value)).filter((value) => Number.isFinite(value) && value >= 0)
       : [1_500, 2_500, 4_000, 6_000];
@@ -410,6 +411,7 @@ class StreamDelivery {
     const initialTarget = state.replyTarget;
     try {
       await this.channelAdapter.sendText(payload);
+      this.notifyOutboundMessageSent(state, payload, kind);
       return;
     } catch (error) {
       const retryTarget = this.resolveRetriableReplyTarget(initialTarget, error);
@@ -433,6 +435,7 @@ class StreamDelivery {
           retryPayload.preserveBlock = true;
         }
         await this.channelAdapter.sendText(retryPayload);
+        this.notifyOutboundMessageSent(state, retryPayload, kind);
         state.replyTarget = retryTarget;
         if (state.bindingKey) {
           this.replyTargetByBindingKey.set(state.bindingKey, {
@@ -449,6 +452,22 @@ class StreamDelivery {
         throw retryError;
       }
     }
+  }
+
+  notifyOutboundMessageSent(state, payload, kind) {
+    if (typeof this.onOutboundMessageSent !== "function") {
+      return;
+    }
+    try {
+      this.onOutboundMessageSent({
+        threadId: state?.threadId || "",
+        bindingKey: state?.bindingKey || "",
+        userId: payload?.userId || "",
+        text: payload?.text || "",
+        kind: normalizeText(kind),
+        sentAt: new Date().toISOString(),
+      });
+    } catch {}
   }
 
   async deferSystemReply(state, text, error, kind = "plain_reply") {

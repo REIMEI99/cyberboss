@@ -85,8 +85,7 @@ class CyberbossApp {
     this.pendingInboundByScope = new Map();
     this.pendingImageInboundByScope = new Map();
     this.turnBoundaryScopeKeys = new Set();
-    this.pendingHabitAuditByRunKey = new Map();
-    this.pendingPulseAuditByRunKey = new Map();
+    this.pendingPostTurnAuditByRunKey = new Map();
     this.approvalOps = createAppApprovals(this, {
       isAutoApprovedStateDirOperation,
       matchesBuiltInCommandPrefix,
@@ -107,9 +106,9 @@ class CyberbossApp {
       sessionStore: this.runtimeAdapter.getSessionStore(),
       runtimeId: this.runtimeAdapter.describe().id,
       onDeferredSystemReply: (payload) => this.deferSystemReply(payload),
+      onOutboundMessageSent: (payload) => this.handleOutboundMessageSent(payload),
     });
     this.pendingOperationByRunKey = new Map();
-    this.pendingFollowupAuditByRunKey = new Map();
     this.runtimeEventChain = Promise.resolve();
     this.runtimeAdapter.onEvent((event) => {
       this.threadStateStore.applyRuntimeEvent(event);
@@ -494,19 +493,7 @@ class CyberbossApp {
         provider: prepared.provider,
       };
       if (turn.turnId) {
-        this.trackPendingFollowupAudit({
-          turn,
-          prepared,
-          bindingKey,
-          workspaceRoot,
-        });
-        this.trackPendingHabitAudit({
-          turn,
-          prepared,
-          bindingKey,
-          workspaceRoot,
-        });
-        this.trackPendingPulseAudit({
+        this.trackPendingPostTurnAudit({
           turn,
           prepared,
           bindingKey,
@@ -881,7 +868,7 @@ class CyberbossApp {
     return this.backgroundOps.flushPendingSystemMessages();
   }
 
-  trackPendingFollowupAudit({ turn, prepared, bindingKey, workspaceRoot }) {
+  trackPendingPostTurnAudit({ turn, prepared, bindingKey, workspaceRoot }) {
     const turnId = normalizeCommandArgument(turn?.turnId);
     const threadId = normalizeCommandArgument(turn?.threadId);
     if (!turnId || !threadId) {
@@ -891,45 +878,22 @@ class CyberbossApp {
       return;
     }
     const originalText = normalizeText(prepared?.originalText ?? prepared?.text);
-    if (!shouldAuditUserFollowup(originalText)) {
+    const shouldAuditFollowup = shouldAuditUserFollowup(originalText);
+    const shouldAuditHabit = shouldAuditHabitClosure(originalText);
+    if (!shouldAuditFollowup && !shouldAuditHabit) {
       return;
     }
-    const baselineReminderIds = this.reminderQueue
-      .listAll()
-      .filter((reminder) => reminder.accountId === prepared.accountId && reminder.senderId === prepared.senderId)
-      .map((reminder) => reminder.id);
-   const baselineActivityIds = this.projectServices?.activity?.allIds?.() || [];
-  this.pendingFollowupAuditByRunKey.set(buildRunKey(threadId, turnId), {
-    threadId,
-    turnId,
-    bindingKey,
-    workspaceRoot,
-    accountId: prepared.accountId,
-    senderId: prepared.senderId,
-    originalText,
-    baselineReminderIds,
-    baselineActivityIds,
-  });
-  }
-
-  trackPendingHabitAudit({ turn, prepared, bindingKey, workspaceRoot }) {
-    const turnId = normalizeCommandArgument(turn?.turnId);
-    const threadId = normalizeCommandArgument(turn?.threadId);
-    if (!turnId || !threadId) {
-      return;
-    }
-    if (normalizeText(prepared?.turnIntent) !== "user_message") {
-      return;
-    }
-    const originalText = normalizeText(prepared?.originalText ?? prepared?.text);
-    if (!shouldAuditHabitClosure(originalText)) {
-      return;
-    }
-    const snapshot = this.projectServices?.habit?.getTodayClosureSnapshot?.();
-    if (!snapshot || Number(snapshot.habitCount) <= 0) {
-      return;
-    }
-    this.pendingHabitAuditByRunKey.set(buildRunKey(threadId, turnId), {
+    const snapshot = this.projectServices?.habit?.getTodayClosureSnapshot?.() || null;
+    const baselineReminderIds = shouldAuditFollowup
+      ? this.reminderQueue
+          .listAll()
+          .filter((reminder) => reminder.accountId === prepared.accountId && reminder.senderId === prepared.senderId)
+          .map((reminder) => reminder.id)
+      : [];
+    const baselineActivityIds = shouldAuditFollowup
+      ? (this.projectServices?.activity?.allIds?.() || [])
+      : [];
+    this.pendingPostTurnAuditByRunKey.set(buildRunKey(threadId, turnId), {
       threadId,
       turnId,
       bindingKey,
@@ -937,31 +901,35 @@ class CyberbossApp {
       accountId: prepared.accountId,
       senderId: prepared.senderId,
       originalText,
-      baselineHabitClosureSnapshot: snapshot,
+      shouldAuditFollowup,
+      shouldAuditHabit,
+      baselineReminderIds,
+      baselineActivityIds,
+      baselineHabitClosureSnapshot: shouldAuditHabit && snapshot && Number(snapshot.habitCount) > 0
+        ? snapshot
+        : null,
     });
   }
 
-  trackPendingPulseAudit({ turn, prepared, bindingKey, workspaceRoot }) {
-    const turnId = normalizeCommandArgument(turn?.turnId);
-    const threadId = normalizeCommandArgument(turn?.threadId);
-    if (!turnId || !threadId) {
+  handleOutboundMessageSent({ bindingKey = "", userId = "", sentAt = "" } = {}) {
+    const normalizedBindingKey = normalizeText(bindingKey);
+    if (!normalizedBindingKey) {
       return;
     }
-    const turnIntent = normalizeText(prepared?.turnIntent);
-    if (!["pulse", "reminder", "system_trigger"].includes(turnIntent)) {
-      return;
+    const workspaceRoots = this.runtimeAdapter.getSessionStore().listWorkspaceRoots(normalizedBindingKey);
+    const normalizedSentAt = normalizeText(sentAt) || new Date().toISOString();
+    for (const workspaceRoot of workspaceRoots) {
+      const normalizedWorkspaceRoot = normalizeCommandArgument(workspaceRoot);
+      if (!normalizedWorkspaceRoot) {
+        continue;
+      }
+      this.runtimeContextStore?.setPulseExposureModule?.(normalizedWorkspaceRoot, "contactGapFloor", {
+        lastBotOutboundAt: normalizedSentAt,
+        lastBotOutboundUserId: normalizeText(userId),
+        pendingPulseDueAt: "",
+        lastPulseTriggeredAt: "",
+      });
     }
-    this.pendingPulseAuditByRunKey.set(buildRunKey(threadId, turnId), {
-      threadId,
-      turnId,
-      bindingKey,
-      workspaceRoot,
-      accountId: prepared.accountId,
-      senderId: prepared.senderId,
-      turnIntent,
-      originalText: normalizeText(prepared?.originalText ?? prepared?.text),
-      baselineSideEffectSnapshot: captureSideEffectSnapshot(this.config),
-    });
   }
 
   async flushPendingTimelineScreenshots(account) {
@@ -1671,30 +1639,6 @@ function shouldAuditHabitClosure(text) {
     /\b(?:not today|skip today|won't do it today|give up for today)\b/i,
   ];
   return completionPatterns.some((pattern) => pattern.test(normalized));
-}
-
-function captureSideEffectSnapshot(config) {
- const trackedPaths = [
-   config?.reminderQueueFile,
-   config?.agentMemoryFile,
-   config?.activityFile,
-    config?.habitDefinitionsFile,
-    config?.habitEventsFile,
-    config?.habitStateFile,
-  ].filter((value) => typeof value === "string" && value.trim());
-  const mtimes = {};
-  for (const filePath of trackedPaths) {
-    mtimes[filePath] = readMtimeMs(filePath);
-  }
-  return { mtimes };
-}
-
-function readMtimeMs(filePath) {
-  try {
-    return fs.statSync(filePath).mtimeMs || 0;
-  } catch {
-    return 0;
-  }
 }
 
 function formatCompactNumber(value) {

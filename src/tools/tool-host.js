@@ -303,7 +303,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_activity_add",
-    description: "Add an open activity for something the user said they will do or are doing. One activity can hold multiple items (a work sequence). A check-back reminder is automatically created and 1:1 bound to this activity. Use checkBackMinutes to set when the first check fires and followupDelayMinutes to set the repeat interval. For near-term actions (user is about to do it), use short values like 10-15 min. For something later today or tomorrow, use longer values like 60-240 min. For long-term wishes with no timeline, use memory type=wishseed instead.",
+    description: "Add an open activity for something the user said they will do or are doing. One activity can hold multiple items (a work sequence). A check-back reminder is automatically created and 1:1 bound to this activity. Use checkBackMinutes to set when the first check fires and followupDelayMinutes to set the repeat interval. For near-term actions (user is about to do it), use short values like 10-15 min. For something later today or tomorrow, use longer values like 60-240 min. For long-term wishes with no timeline, use memory type=wishseed instead. If the user is now taking action on a previously standalone reminder, pass replacesReminderId to close that old reminder after the new activity-reminder pair is created.",
     shortHint: "Add an open activity with auto check-back reminder.",
     topics: ["activity", "reminder"],
     inputSchema: {
@@ -314,6 +314,7 @@ const PROJECT_TOOLS = [
         items: { type: "array", items: { type: "string" }, description: "Optional list of specific items in this work sequence. Omit if the title alone is sufficient." },
         checkBackMinutes: { type: "integer", description: "REQUIRED. Minutes before the first check-back fires. You must choose a value based on when the user will plausibly be doing this: 10-15 for imminent actions, 30-60 for later today, 120-240 for tomorrow. Setting this too low causes unnecessary pings." },
         followupDelayMinutes: { type: "integer", description: "Minutes between repeated check-backs after the first fire. Usually the same as checkBackMinutes. Set higher (e.g. 60-240) for non-urgent activities to avoid pestering." },
+        replacesReminderId: { type: "string", description: "Optional standalone reminder id to close after creating this new activity-reminder pair." },
       },
       additionalProperties: false,
     },
@@ -331,6 +332,14 @@ const PROJECT_TOOLS = [
         reminderId = reminder.id;
         if (reminderId) {
           services.activity.bindReminder({ id: activity.id, reminderId });
+        }
+        const replacesReminderId = normalizeText(args.replacesReminderId);
+        if (replacesReminderId && replacesReminderId !== reminderId) {
+          try {
+            services.reminder.complete({ id: replacesReminderId });
+          } catch (error) {
+            console.warn(`[cyberboss] activity reminder replacement failed: ${error?.message || error}`);
+          }
         }
       } catch (error) {
         console.warn(`[cyberboss] activity reminder creation failed: ${error?.message || error}`);
@@ -1342,15 +1351,17 @@ function normalizeText(value) {
 
 function evaluateContactGapFloor({ config, runtimeContextStore, workspaceRoot }) {
   const maxGapMinutes = Number.parseInt(String(config?.maxContactGapMinutes || ""), 10);
-  const thresholdMinutes = Number.isFinite(maxGapMinutes) && maxGapMinutes > 0 ? maxGapMinutes : 60;
+  const thresholdMinutes = Number.isFinite(maxGapMinutes) && maxGapMinutes > 0 ? maxGapMinutes : 45;
   const floorState = runtimeContextStore?.getPulseExposureModule?.(workspaceRoot, "contactGapFloor");
+  const lastBotOutboundAt = normalizeText(floorState?.lastBotOutboundAt);
   const lastUserMessageAt = normalizeText(floorState?.lastUserMessageAt);
-  if (!lastUserMessageAt) {
-    return { triggered: false, gapMinutes: null, quietHours: false, reason: "no user message recorded yet" };
+  const anchorTime = lastBotOutboundAt || lastUserMessageAt;
+  if (!anchorTime) {
+    return { triggered: false, gapMinutes: null, quietHours: false, reason: "no contact anchor recorded yet" };
   }
-  const lastMs = Date.parse(lastUserMessageAt);
+  const lastMs = Date.parse(anchorTime);
   if (!Number.isFinite(lastMs)) {
-    return { triggered: false, gapMinutes: null, quietHours: false, reason: "invalid last user message timestamp" };
+    return { triggered: false, gapMinutes: null, quietHours: false, reason: "invalid contact anchor timestamp" };
   }
   const gapMs = Math.max(0, Date.now() - lastMs);
   const gapMinutes = Math.floor(gapMs / 60000);
@@ -1363,7 +1374,7 @@ function evaluateContactGapFloor({ config, runtimeContextStore, workspaceRoot })
       triggered: true,
       gapMinutes,
       quietHours: false,
-      reason: `user has been silent for ${gapMinutes} minutes (threshold ${thresholdMinutes} min); contact is required`,
+      reason: `it has been ${gapMinutes} minutes since the last contact (threshold ${thresholdMinutes} min); reach out now`,
     };
   }
   return { triggered: false, gapMinutes, quietHours: false, reason: `gap ${gapMinutes} min below threshold ${thresholdMinutes} min` };

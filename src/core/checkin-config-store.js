@@ -1,8 +1,8 @@
 const fs = require("fs");
 const path = require("path");
 
-const DEFAULT_MIN_INTERVAL_MS = 3 * 60_000;
-const DEFAULT_MAX_INTERVAL_MS = 60 * 60_000;
+const DEFAULT_MIN_INTERVAL_MS = 5 * 60_000;
+const DEFAULT_MAX_INTERVAL_MS = 15 * 60_000;
 
 class CheckinConfigStore {
   constructor({ filePath }) {

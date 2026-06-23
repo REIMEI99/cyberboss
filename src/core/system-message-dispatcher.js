@@ -58,15 +58,17 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse" } =
     `System kind: ${effectiveKind}.`,
     effectiveKind === "reminder"
       ? "This is a due reminder. Your default action is to send a message to the user. Do not return silent for a due reminder unless the user already confirmed completion in the current turn."
-      : "This is a pulse-like trigger. Review context, decide whether to contact the user, and decide follow-up.",
+      : "This is a pulse-like trigger. Review context and decide whether to contact the user now.",
     "Default first step: use cyberboss_pulse_review unless the trigger already gives you enough context.",
     "Activity is the soul of this assistant. Read the situation in this order: current open activities (what is the user doing or about to do?), today's habit state, any Obsidian signal, memory items, whether user contact is useful now, and whether a follow-up is needed.",
     "For near-term user actions, capture them as open activities with cyberboss_activity_add; the activity auto-binds a check-back reminder. Use a standalone reminder only for far-future non-action follow-ups.",
     effectiveKind === "reminder"
       ? "Due reminders stay active until explicitly cleared. Do not assume the user already did it just because the reminder fired. If recent context clearly shows completion, list active reminders and clear the matching one. Otherwise, send a message to the user now."
-      : "Do not assume that the user will remember or act just because they said it out loud.",
+      : "If you have not contacted the user for a while, treat this as a real opportunity to reach out. Only return silent if the user explicitly said not to message, or quiet hours are active.",
     "Habit closure matters. If a habit is still incomplete today, either nudge now or set a reminder to check later. If the user already confirmed completion or clean abandonment, prefer writing the habit state.",
-    "If you return silent, that should only happen when the user already confirmed completion in this turn, or when quiet hours make contact inappropriate. A due reminder is not a valid reason for silence.",
+    effectiveKind === "reminder"
+      ? "For a due reminder, sending the user a message is itself a complete action. Do not require extra private maintenance work before finishing the turn."
+      : "For a pulse, silence is allowed only when the user explicitly said not to message, or quiet hours are active.",
     "Return exactly one JSON object after any tool calls:",
     "{\"action\":\"silent\"}",
     "{\"action\":\"send_message\",\"message\":\"<one short natural WeChat message>\"}",

@@ -6,10 +6,14 @@ const { CheckinConfigStore, resolveDefaultCheckinRange } = require("../core/chec
 const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("../core/default-targets");
 const { SystemMessageQueueStore } = require("../core/system-message-queue-store");
 const { ObsidianService } = require("../services/obsidian-service");
+const { RuntimeContextStore } = require("../tools/runtime-context-store");
 
-const INTERNAL_CHECKIN_TRIGGER_TEMPLATE = "A quiet pulse fires. First review %USER%'s current context and decide whether contact is useful now: if you do not know her situation, have memory findings not yet discussed, a habit genuinely fits the current scene, or she seems stalled and a small intervention would help, consider a short message. If a habit is still incomplete but the timing is not right for contact, set yourself a reminder to check again later. If you decide not to contact her, you still must do one small private action: inspect context, review habits/memory if relevant, capture or refine a memory item, remember what matters, prepare a private note, or maintain diary/timeline.";
-const CHECKIN_SYSTEM_MESSAGE_SOURCE = "checkin";
+const INTERNAL_CHECKIN_TRIGGER_TEMPLATE = "A quiet pulse fires because you have not contacted %USER% for a while. You thought of her. Review current context and decide whether to send a short natural message now. Only return silent if the user explicitly said not to message, or quiet hours are active. This is not a due reminder; it is a relationship check-in opportunity.";
+const CHECKIN_SYSTEM_MESSAGE_SOURCE = "contact_gap_pulse";
 const CHECKIN_SYSTEM_MESSAGE_TTL_MS = 30 * 60 * 1000;
+const CONTACT_GAP_MODULE = "contactGapFloor";
+const CONTACT_GAP_POLL_INTERVAL_MS = 60_000;
+const DEFAULT_REMINDER_BLOCK_WINDOW_MS = 15 * 60_000;
 
 async function runSystemCheckinPoller(config) {
   const account = resolveSelectedAccount(config);
@@ -17,21 +21,27 @@ async function runSystemCheckinPoller(config) {
   const obsidian = new ObsidianService({ config });
   const checkinConfigStore = new CheckinConfigStore({ filePath: config.checkinConfigFile });
   const sessionStore = new SessionStore({ filePath: config.sessionsFile });
+  const runtimeContextStore = new RuntimeContextStore({ filePath: config.projectToolContextFile });
   const target = resolvePollerTarget({ config, account, sessionStore });
   const defaultRange = resolveDefaultCheckinRange();
   let currentRange = checkinConfigStore.getRange(defaultRange);
+  const contactGapMinutes = Number.parseInt(String(config?.maxContactGapMinutes || ""), 10) > 0
+    ? Number.parseInt(String(config?.maxContactGapMinutes || ""), 10)
+    : 45;
 
   console.log(`[cyberboss] checkin poller ready user=${target.senderId} workspace=${target.workspaceRoot}`);
-  console.log(`[cyberboss] checkin interval range ${formatRangeMinutes(currentRange)}`);
+  console.log(`[cyberboss] pulse contact-gap threshold ${contactGapMinutes}m; trigger delay ${formatRangeMinutes(currentRange)}`);
 
   while (true) {
-    currentRange = checkinConfigStore.getRange(defaultRange);
-    const delayMs = pickRandomDelayMs(currentRange.minIntervalMs, currentRange.maxIntervalMs);
-    const wakeAt = formatLocalTime(Date.now() + delayMs);
-    console.log(`[cyberboss] next checkin in ${Math.round(delayMs / 60000)}m at ${wakeAt}`);
-    await sleep(delayMs);
-
     const nowMs = Date.now();
+    currentRange = checkinConfigStore.getRange(defaultRange);
+    const pulseState = runtimeContextStore.getPulseExposureModule(target.workspaceRoot, CONTACT_GAP_MODULE) || {};
+    const pendingPulseDueAtMs = Date.parse(String(pulseState.pendingPulseDueAt || ""));
+    if (Number.isFinite(pendingPulseDueAtMs) && pendingPulseDueAtMs > nowMs) {
+      await sleep(Math.min(CONTACT_GAP_POLL_INTERVAL_MS, Math.max(1_000, pendingPulseDueAtMs - nowMs)));
+      continue;
+    }
+
     const baseCheckinTrigger = buildCheckinTrigger(config);
     const checkinTrigger = buildCheckinTrigger(config, {
       obsidianExcerpt: loadRandomObsidianExcerpt(obsidian),
@@ -47,21 +57,66 @@ async function runSystemCheckinPoller(config) {
     }
 
     if (queue.hasPendingForAccount(account.accountId)) {
-      console.log("[cyberboss] checkin skipped: pending system message still in queue");
+      await sleep(CONTACT_GAP_POLL_INTERVAL_MS);
       continue;
     }
 
+    if (isWithinQuietHours(config?.quietHoursStart, config?.quietHoursEnd)) {
+      runtimeContextStore.setPulseExposureModule(target.workspaceRoot, CONTACT_GAP_MODULE, {
+        pendingPulseDueAt: "",
+      });
+      await sleep(CONTACT_GAP_POLL_INTERVAL_MS);
+      continue;
+    }
+
+    if (hasReminderDueSoon(config.reminderQueueFile, target.senderId, nowMs)) {
+      runtimeContextStore.setPulseExposureModule(target.workspaceRoot, CONTACT_GAP_MODULE, {
+        pendingPulseDueAt: "",
+      });
+      await sleep(CONTACT_GAP_POLL_INTERVAL_MS);
+      continue;
+    }
+
+    const lastBotOutboundAtMs = Date.parse(String(pulseState.lastBotOutboundAt || ""));
+    const gapMinutes = Number.isFinite(lastBotOutboundAtMs)
+      ? Math.floor(Math.max(0, nowMs - lastBotOutboundAtMs) / 60000)
+      : Infinity;
+    if (gapMinutes < contactGapMinutes) {
+      runtimeContextStore.setPulseExposureModule(target.workspaceRoot, CONTACT_GAP_MODULE, {
+        pendingPulseDueAt: "",
+      });
+      await sleep(CONTACT_GAP_POLL_INTERVAL_MS);
+      continue;
+    }
+
+    if (!Number.isFinite(pendingPulseDueAtMs) || pendingPulseDueAtMs <= 0) {
+      const delayMs = pickRandomDelayMs(currentRange.minIntervalMs, currentRange.maxIntervalMs);
+      const dueAtMs = nowMs + delayMs;
+      runtimeContextStore.setPulseExposureModule(target.workspaceRoot, CONTACT_GAP_MODULE, {
+        pendingPulseDueAt: new Date(dueAtMs).toISOString(),
+      });
+      console.log(`[cyberboss] contact-gap pulse armed in ${Math.round(delayMs / 60000)}m at ${formatLocalTime(dueAtMs)}`);
+      await sleep(Math.min(CONTACT_GAP_POLL_INTERVAL_MS, delayMs));
+      continue;
+    }
+
+    runtimeContextStore.setPulseExposureModule(target.workspaceRoot, CONTACT_GAP_MODULE, {
+      pendingPulseDueAt: "",
+      lastPulseTriggeredAt: new Date(nowMs).toISOString(),
+    });
     const queued = queue.enqueue({
       id: crypto.randomUUID(),
       accountId: account.accountId,
       senderId: target.senderId,
       workspaceRoot: target.workspaceRoot,
       text: checkinTrigger,
+      kind: "pulse",
       source: CHECKIN_SYSTEM_MESSAGE_SOURCE,
       createdAt: new Date(nowMs).toISOString(),
       expiresAt: new Date(nowMs + CHECKIN_SYSTEM_MESSAGE_TTL_MS).toISOString(),
     });
-    console.log(`[cyberboss] checkin queued id=${queued.id}`);
+    console.log(`[cyberboss] contact-gap pulse queued id=${queued.id}`);
+    await sleep(CONTACT_GAP_POLL_INTERVAL_MS);
   }
 }
 
@@ -126,6 +181,18 @@ function formatRangeMinutes(range) {
   return `${Math.round(range.minIntervalMs / 60000)}m-${Math.round(range.maxIntervalMs / 60000)}m`;
 }
 
+function hasReminderDueSoon(reminderQueueFile, senderId, nowMs) {
+  try {
+    const { ReminderQueueStore } = require("../adapters/channel/weixin/reminder-queue-store");
+    const store = new ReminderQueueStore({ filePath: reminderQueueFile });
+    return store
+      .listAll()
+      .some((reminder) => reminder.senderId === senderId && Number(reminder.dueAtMs || 0) <= nowMs + DEFAULT_REMINDER_BLOCK_WINDOW_MS);
+  } catch {
+    return false;
+  }
+}
+
 function loadRandomObsidianExcerpt(obsidian) {
   try {
     const result = obsidian.randomDailyExcerpt({ daysBack: 45, maxChars: 700 });
@@ -150,6 +217,42 @@ function buildCheckinTrigger(config, { obsidianExcerpt = null } = {}) {
     "",
     "Use this fragment only as a spark. If it points to a searchable interest, seed, object, place, media, product, or question, you may investigate and capture the finding as a memory item. If it is private reflection or work/psychological context, use it only for judgment and do not force a search.",
   ].join("\n").trim();
+}
+
+function isWithinQuietHours(quietHoursStart, quietHoursEnd, now = new Date()) {
+  const start = parseHourMinute(quietHoursStart);
+  const end = parseHourMinute(quietHoursEnd);
+  if (start === null || end === null) {
+    return false;
+  }
+  const localTime = new Intl.DateTimeFormat("en-US", {
+    timeZone: "Asia/Shanghai",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(now);
+  const parts = localTime.split(":").map(Number);
+  const currentMinutes = parts[0] * 60 + parts[1];
+  if (start <= end) {
+    return currentMinutes >= start && currentMinutes < end;
+  }
+  return currentMinutes >= start || currentMinutes < end;
+}
+
+function parseHourMinute(value) {
+  if (typeof value !== "string") {
+    return null;
+  }
+  const match = value.trim().match(/^(\d{1,2}):(\d{2})$/);
+  if (!match) {
+    return null;
+  }
+  const hour = Number.parseInt(match[1], 10);
+  const minute = Number.parseInt(match[2], 10);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+  return hour * 60 + minute;
 }
 
 module.exports = { runSystemCheckinPoller };
