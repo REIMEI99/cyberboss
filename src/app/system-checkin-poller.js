@@ -35,6 +35,7 @@ async function runSystemCheckinPoller(config) {
   while (true) {
     const nowMs = Date.now();
     currentRange = checkinConfigStore.getRange(defaultRange);
+    runtimeContextStore.load();
     const pulseState = runtimeContextStore.getPulseExposureModule(target.workspaceRoot, CONTACT_GAP_MODULE) || {};
     const pendingPulseDueAtMs = Date.parse(String(pulseState.pendingPulseDueAt || ""));
     if (Number.isFinite(pendingPulseDueAtMs) && pendingPulseDueAtMs > nowMs) {
@@ -86,6 +87,19 @@ async function runSystemCheckinPoller(config) {
         pendingPulseDueAt: "",
       });
       await sleep(CONTACT_GAP_POLL_INTERVAL_MS);
+      continue;
+    }
+
+    const lastPulseTriggeredAtMs = Date.parse(String(pulseState.lastPulseTriggeredAt || ""));
+    const cooldownMs = Number.isFinite(lastPulseTriggeredAtMs)
+      ? Math.max(0, nowMs - lastPulseTriggeredAtMs)
+      : Infinity;
+    if (cooldownMs < currentRange.minIntervalMs) {
+      runtimeContextStore.setPulseExposureModule(target.workspaceRoot, CONTACT_GAP_MODULE, {
+        pendingPulseDueAt: "",
+      });
+      const remainingCooldownMs = currentRange.minIntervalMs - cooldownMs;
+      await sleep(Math.min(CONTACT_GAP_POLL_INTERVAL_MS, Math.max(1_000, remainingCooldownMs)));
       continue;
     }
 

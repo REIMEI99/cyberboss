@@ -303,7 +303,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_activity_add",
-    description: "Add an open activity for something the user said they will do or are doing. One activity can hold multiple items (a work sequence). A check-back reminder is automatically created and 1:1 bound to this activity. Use checkBackMinutes to set when the first check fires and followupDelayMinutes to set the repeat interval. For near-term actions (user is about to do it), use short values like 10-15 min. For something later today or tomorrow, use longer values like 60-240 min. For long-term wishes with no timeline, use memory type=wishseed instead. If the user is now taking action on a previously standalone reminder, pass replacesReminderId to close that old reminder after the new activity-reminder pair is created.",
+    description: "Add an open activity for something the user said they will do or are doing. One activity can hold multiple items (a work sequence). A check-back reminder is automatically created and 1:1 bound to this activity. Use checkBackMinutes to set when the first check fires and followupDelayMinutes to set the repeat interval. For near-term actions (user is about to do it), use short values matching what the user actually said. For something later in the day, use proportionate but conservative values. For long-term wishes with no timeline, use memory type=wishseed instead. If the user is now taking action on a previously standalone reminder, pass replacesReminderId to close that old reminder after the new activity-reminder pair is created.",
     shortHint: "Add an open activity with auto check-back reminder.",
     topics: ["activity", "reminder"],
     inputSchema: {
@@ -312,7 +312,7 @@ const PROJECT_TOOLS = [
       properties: {
         title: { type: "string", description: "Short title for the activity or work sequence." },
         items: { type: "array", items: { type: "string" }, description: "Optional list of specific items in this work sequence. Omit if the title alone is sufficient." },
-        checkBackMinutes: { type: "integer", description: "REQUIRED. Minutes before the first check-back fires. You must choose a value based on when the user will plausibly be doing this: 10-15 for imminent actions, 30-60 for later today, 120-240 for tomorrow. Setting this too low causes unnecessary pings." },
+        checkBackMinutes: { type: "integer", description: "REQUIRED. Minutes before the first check-back fires. Set exactly what the user implied, do not round up to a day. Use short values (5-30) for imminent actions and proportionally higher values only when the user explicitly mentioned a later timeframe. Setting this too low causes unnecessary pings." },
         followupDelayMinutes: { type: "integer", description: "Minutes between repeated check-backs after the first fire. Usually the same as checkBackMinutes. Set higher (e.g. 60-240) for non-urgent activities to avoid pestering." },
         replacesReminderId: { type: "string", description: "Optional standalone reminder id to close after creating this new activity-reminder pair." },
       },
@@ -421,7 +421,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_activity_drop",
-    description: "Drop an open activity â€” the user won't do it, or it's no longer relevant. The activity is removed immediately. The bound check-back reminder is cleared automatically.",
+    description: "Drop an open activity â€?the user won't do it, or it's no longer relevant. The activity is removed immediately. The bound check-back reminder is cleared automatically.",
     shortHint: "Drop an open activity.",
     topics: ["activity"],
     inputSchema: {
@@ -480,7 +480,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_activity_list_done",
-    description: "List recently completed activities (done history). Debug use only â€” not for routine context.",
+    description: "List recently completed activities (done history). Debug use only â€?not for routine context.",
     shortHint: "List done activities (debug).",
     topics: ["activity"],
     inputSchema: {
@@ -701,9 +701,9 @@ const PROJECT_TOOLS = [
       required: ["text"],
       properties: {
         text: { type: "string", description: "Reminder text that preserves the future follow-up hook." },
-        delayMinutes: { type: "integer", description: "REQUIRED (or use dueAt). Minutes from now before the reminder fires. Choose based on urgency: 10-30 for near-term, 60-240 for later today, 1440+ for tomorrow or beyond." },
+        delayMinutes: { type: "integer", description: "REQUIRED (or use dueAt). Minutes from now before the reminder fires. Set exactly what the user asked, do not round up. Use 10-30 for near-term tasks, 60-240 for later today, and higher values only when the user explicitly specified hours or days." },
         dueAt: { type: "string", description: "Absolute time such as 2026-04-07T21:30+08:00." },
-        followupDelayMinutes: { type: "integer", description: "Minutes between repeated fires after the first one. Set to match delayMinutes for consistent cadence, or higher to avoid pestering." },
+        followupDelayMinutes: { type: "integer", description: "Minutes between repeated fires after the first one. MUST match delayMinutes unless the user explicitly asked for a different repeat cadence. Do NOT increase this to a large value like 1440 on your own." },
         userId: { type: "string", description: "Optional explicit WeChat user id." },
       },
       additionalProperties: false,
@@ -1435,7 +1435,7 @@ function buildPulseReviewSummary({
   const openActivities = Array.isArray(activities?.activities) ? activities.activities : [];
   const durableMemories = Array.isArray(memories?.memories) ? memories.memories : [];
 
-  // Activity analysis â€” first priority regardless of turn intent.
+  // Activity analysis â€?first priority regardless of turn intent.
   const isUserMessage = turnIntent === "user_message";
   const oldestActivity = openActivities.length
     ? openActivities.reduce((oldest, item) => {

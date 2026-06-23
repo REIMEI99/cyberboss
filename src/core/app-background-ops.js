@@ -51,7 +51,7 @@ async function flushPendingTimelineScreenshots(app, account) {
       }).catch(() => {});
       await app.channelAdapter.sendText({
         userId: job.senderId,
-        text: `âŒ Timeline screenshot failed\n${messageText}`,
+        text: `â?Timeline screenshot failed\n${messageText}`,
         preserveBlock: true,
       }).catch(() => {});
     }
@@ -69,6 +69,16 @@ async function flushDueReminders(app, account) {
         id: reminder.id,
         dueAtMs: Date.now() + resolveReminderFollowupDelayMs(reminder),
       });
+    } catch {
+      try {
+        app.reminderQueue.defer({
+          id: reminder.id,
+          dueAtMs: Date.now() + 5_000,
+        });
+      } catch {}
+      continue;
+    }
+    try {
       app.systemMessageQueue.enqueue({
         id: `reminder:${reminder.id}`,
         accountId: reminder.accountId,
@@ -78,13 +88,9 @@ async function flushDueReminders(app, account) {
         text: buildReminderSystemTrigger(reminder, app.config),
         createdAt: new Date().toISOString(),
       });
-    } catch {
-      try {
-        app.reminderQueue.defer({
-          id: reminder.id,
-          dueAtMs: Date.now() + 5_000,
-        });
-      } catch {}
+    } catch (enqueueError) {
+      console.error(`[cyberboss] system message enqueue failed for reminder ${reminder.id}: ${enqueueError instanceof Error ? enqueueError.message : String(enqueueError || "unknown error")}`);
+      console.error(`[cyberboss]   workspaceRoot=${JSON.stringify(app.resolveReminderWorkspaceRoot(reminder))} senderId=${reminder.senderId} accountId=${reminder.accountId}`);
     }
   }
 }
@@ -106,6 +112,10 @@ function resolveReminderFollowupDelayMs(reminder) {
   const minutes = Number.parseInt(String(reminder?.followupDelayMinutes || ""), 10);
   const effectiveMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
   return effectiveMinutes * 60_000;
+}
+
+function normalizeText(value) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 module.exports = {
