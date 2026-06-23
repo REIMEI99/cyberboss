@@ -1715,39 +1715,27 @@ function formatContextStatusLine({ runtimeName, context, claudeContextWindow, cl
   if (runtimeName === "claudecode") {
     const configuredWindow = Number(claudeContextWindow);
     if (!Number.isFinite(configuredWindow) || configuredWindow <= 0) {
-      return "📦 context: set CYBERBOSS_CLAUDE_CONTEXT_WINDOW";
-    }
-    const reservedOutputTokens = Math.max(0, Number(claudeMaxOutputTokens) || 0);
-    const availableMessageWindow = configuredWindow - reservedOutputTokens;
-    if (availableMessageWindow <= 0) {
-      return "📦 context: reduce CLAUDE_CODE_MAX_OUTPUT_TOKENS";
+      return "📦 tokens: set CYBERBOSS_CLAUDE_CONTEXT_WINDOW";
     }
     if (!context || !Number.isFinite(Number(context.currentTokens))) {
-      return "📦 context: unavailable";
+      return "📦 tokens: unavailable";
     }
-    const summary = formatContextUsage(Number(context.currentTokens), availableMessageWindow);
+    const parts = ["📦 tokens: " + formatCompactNumber(context.currentTokens) + " session | " + formatCompactNumber(configuredWindow) + " window"];
+    const reservedOutputTokens = Math.max(0, Number(claudeMaxOutputTokens) || 0);
     if (reservedOutputTokens > 0) {
-      return `📦 context: approx ${summary} | reserve ${formatCompactNumber(reservedOutputTokens)}`;
+      parts.push("reserve " + formatCompactNumber(reservedOutputTokens));
     }
-    return `📦 context: approx ${summary}`;
+    return parts.join(" | ");
   }
   if (!context) {
-    return "📦 context: unavailable";
+    return "📦 tokens: unavailable";
   }
-  const currentTokens = Number(context.currentTokens);
+  const sessionTotal = Number(context.currentTokens);
   const contextWindow = Number(context.contextWindow);
-  if (!Number.isFinite(currentTokens) || !Number.isFinite(contextWindow) || contextWindow <= 0) {
-    return "📦 context: unavailable";
+  if (!Number.isFinite(sessionTotal)) {
+    return "📦 tokens: unavailable";
   }
-  return `📦 context: ${formatContextUsage(currentTokens, contextWindow)}`;
-}
-
-function formatContextUsage(currentTokens, contextWindow) {
-  const safeCurrent = Math.max(0, Number(currentTokens) || 0);
-  const safeWindow = Math.max(1, Number(contextWindow) || 1);
-  const clampedCurrent = Math.min(safeCurrent, safeWindow);
-  const leftPercent = Math.max(0, Math.min(100, Math.round(((safeWindow - clampedCurrent) / safeWindow) * 100)));
-  return `${formatCompactNumber(clampedCurrent)}/${formatCompactNumber(safeWindow)} | ${leftPercent}% left`;
+  return "📦 tokens: " + formatCompactNumber(sessionTotal) + " session" + (Number.isFinite(contextWindow) && contextWindow > 0 ? " | " + formatCompactNumber(contextWindow) + " window" : "");
 }
 
 function buildLocationMovementSystemText(event) {

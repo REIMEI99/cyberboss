@@ -83,6 +83,13 @@ async function handleCompletedOrFailedTurn(app, event, failureReplyTarget) {
       });
     }
 
+    if (event.type === "runtime.turn.completed") {
+      await maybeAutoCompact(app, event, linked, pendingOperation).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error || "unknown error");
+        console.error(`[cyberboss] auto-compact failed ${message}`);
+      });
+    }
+
     const shouldKeepTyping = linked?.bindingKey && linked?.workspaceRoot
       ? (
         app.turnGateStore.isPending(linked.bindingKey, linked.workspaceRoot)
@@ -96,6 +103,87 @@ async function handleCompletedOrFailedTurn(app, event, failureReplyTarget) {
     if (scopeKey) {
       app.turnBoundaryScopeKeys.delete(scopeKey);
     }
+  }
+}
+
+async function maybeAutoCompact(app, event, linked, pendingOperation) {
+  if (event.type !== "runtime.turn.completed") {
+    return;
+  }
+  // Skip if the just-completed turn was itself a compact
+  if (pendingOperation?.kind === "compact") {
+    return;
+  }
+  const runtimeName = app.runtimeAdapter?.describe?.()?.id || "";
+  if (runtimeName !== "claudecode") {
+    return;
+  }
+  const contextWindow = Number(app.config?.claudeContextWindow);
+  if (!Number.isFinite(contextWindow) || contextWindow <= 0) {
+    return;
+  }
+  const threshold = Math.min(100, Math.max(1, Number(app.config?.autoCompactThreshold) || 95));
+  const threadId = event?.payload?.threadId;
+  if (!threadId) {
+    return;
+  }
+  const threadState = app.threadStateStore?.getThreadState?.(threadId);
+  const context = threadState?.context;
+  if (!context || context.runtimeId !== "claudecode") {
+    return;
+  }
+  const currentTokens = Number(context.currentTokens);
+  if (!Number.isFinite(currentTokens) || currentTokens <= 0) {
+    return;
+  }
+  const ratio = currentTokens / contextWindow;
+  if (ratio < threshold / 100) {
+    return;
+  }
+  // Skip if a compact is already pending for this thread
+  for (const [runKey, op] of app.pendingOperationByRunKey) {
+    if (op?.kind === "compact" && runKey.startsWith(threadId + ":")) {
+      return;
+    }
+  }
+  if (!linked?.bindingKey || !linked?.workspaceRoot) {
+    return;
+  }
+  const senderId = linked.bindingKey.split(":")[2] || "";
+  if (!senderId) {
+    return;
+  }
+  const sessionStore = app.runtimeAdapter.getSessionStore();
+  const model = sessionStore.getRuntimeParamsForWorkspace(linked.bindingKey, linked.workspaceRoot).model;
+  const pct = Math.round(ratio * 100);
+  console.log(`[cyberboss] auto-compact triggered: ${currentTokens}/${contextWindow} tokens (${pct}%) >= ${threshold}%`);
+  try {
+    app.streamDelivery?.queueReplyTargetForThread?.(threadId, {
+      userId: senderId,
+      contextToken: "",
+      provider: "",
+    });
+    const result = await app.runtimeAdapter.compactThread({
+      threadId,
+      workspaceRoot: linked.workspaceRoot,
+      model,
+    });
+    const compactTurnId = typeof result?.turnId === "string" ? result.turnId.trim() : "";
+    if (compactTurnId) {
+      app.pendingOperationByRunKey.set(buildRunKey(threadId, compactTurnId), {
+        kind: "compact",
+        userId: senderId,
+        contextToken: "",
+      });
+    }
+    await app.channelAdapter.sendText({
+      userId: senderId,
+      text: `\u{1F5DC}\u{FE0F} Context at ${pct}% \u2014 auto-compacting\nthread: ${threadId}`,
+      contextToken: "",
+    }).catch(() => {});
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error || "unknown error");
+    console.error(`[cyberboss] auto-compact failed: ${message}`);
   }
 }
 

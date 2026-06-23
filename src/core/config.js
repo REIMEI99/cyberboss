@@ -95,6 +95,7 @@ function readConfig() {
     claudeCommand: readTextEnv("CYBERBOSS_CLAUDE_COMMAND") || "claude",
     claudeModel: readTextEnv("CYBERBOSS_CLAUDE_MODEL") || "",
     claudeContextWindow: readIntEnv("CYBERBOSS_CLAUDE_CONTEXT_WINDOW"),
+    autoCompactThreshold: readIntEnv("CYBERBOSS_AUTO_COMPACT_THRESHOLD") || 95,
     claudeMaxOutputTokens: readIntEnv("CLAUDE_CODE_MAX_OUTPUT_TOKENS"),
     claudePermissionMode: readTextEnv("CYBERBOSS_CLAUDE_PERMISSION_MODE") || "default",
     claudeDisableVerbose: readBoolEnv("CYBERBOSS_CLAUDE_DISABLE_VERBOSE"),
