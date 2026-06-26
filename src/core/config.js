@@ -92,6 +92,8 @@ function readConfig() {
     embeddingModel: readTextEnv("CYBERBOSS_EMBEDDING_MODEL") || "text-embedding-3-small",
     embeddingTimeoutMs: readIntEnv("CYBERBOSS_EMBEDDING_TIMEOUT_MS") || 30_000,
     embeddingBatchSize: readIntEnv("CYBERBOSS_EMBEDDING_BATCH_SIZE") || 10,
+    memoryDedupThreshold: readFloatEnv("CYBERBOSS_MEMORY_DEDUP_THRESHOLD") ?? 0.92,
+    memoryDedupLimit: readIntEnv("CYBERBOSS_MEMORY_DEDUP_LIMIT") || 3,
     claudeCommand: readTextEnv("CYBERBOSS_CLAUDE_COMMAND") || "claude",
     claudeModel: readTextEnv("CYBERBOSS_CLAUDE_MODEL") || "",
     claudeContextWindow: readIntEnv("CYBERBOSS_CLAUDE_CONTEXT_WINDOW"),
@@ -142,6 +144,15 @@ function readIntEnv(name) {
     return undefined;
   }
   const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function readFloatEnv(name) {
+  const value = readTextEnv(name);
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : undefined;
 }
 

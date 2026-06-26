@@ -303,7 +303,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_activity_add",
-    description: "Add an open activity for something the user said they will do or are doing. One activity can hold multiple items (a work sequence). A check-back reminder is automatically created and 1:1 bound to this activity. Use checkBackMinutes to set when the first check fires and followupDelayMinutes to set the repeat interval. For near-term actions (user is about to do it), use short values matching what the user actually said. For something later in the day, use proportionate but conservative values. For long-term wishes with no timeline, use memory type=wishseed instead. If the user is now taking action on a previously standalone reminder, pass replacesReminderId to close that old reminder after the new activity-reminder pair is created.",
+    description: "Add an open activity for something the user said they will do or are doing. One activity can hold multiple items (a work sequence). A short-cycle check-back reminder is automatically created and 1:1 bound to this activity. Use checkBackMinutes to set when the first check fires and followupDelayMinutes to set the repeat interval. For current or same-day ongoing actions, default to a conservative short value, usually 10-60 minutes. Do not use half-day values like 480 unless the user explicitly said the action belongs much later. For long-term wishes with no timeline, use memory type=wishseed instead. If the user is now taking action on a previously standalone reminder, pass replacesReminderId to close that old reminder after the new activity-reminder pair is created.",
     shortHint: "Add an open activity with auto check-back reminder.",
     topics: ["activity", "reminder"],
     inputSchema: {
@@ -312,8 +312,8 @@ const PROJECT_TOOLS = [
       properties: {
         title: { type: "string", description: "Short title for the activity or work sequence." },
         items: { type: "array", items: { type: "string" }, description: "Optional list of specific items in this work sequence. Omit if the title alone is sufficient." },
-        checkBackMinutes: { type: "integer", description: "REQUIRED. Minutes before the first check-back fires. Set exactly what the user implied, do not round up to a day. Use short values (5-30) for imminent actions and proportionally higher values only when the user explicitly mentioned a later timeframe. Setting this too low causes unnecessary pings." },
-        followupDelayMinutes: { type: "integer", description: "Minutes between repeated check-backs after the first fire. Usually the same as checkBackMinutes. Set higher (e.g. 60-240) for non-urgent activities to avoid pestering." },
+        checkBackMinutes: { type: "integer", description: "REQUIRED. Minutes before the first check-back fires. Set what the user actually implied; do not silently round same-day work up to half a day. For imminent actions use 5-30. For something the user is continuing today, usually use 10-60. Only go above 120 when the user explicitly placed it later in the day or several hours away. Values like 480 are usually wrong for an ongoing activity." },
+        followupDelayMinutes: { type: "integer", description: "Minutes between repeated check-backs after the first fire. Usually the same as checkBackMinutes or slightly higher. For same-day ongoing activities, keep it short enough to maintain contact; do not turn an activity into an all-day reminder loop unless the user explicitly wants that cadence." },
         replacesReminderId: { type: "string", description: "Optional standalone reminder id to close after creating this new activity-reminder pair." },
       },
       additionalProperties: false,
@@ -468,9 +468,15 @@ const PROJECT_TOOLS = [
         if (dropped.reminderId) {
           try { services.reminder.complete({ id: dropped.reminderId }); } catch {}
         }
+        if (memory?.action === "review_existing") {
+          return {
+            text: `Activity matched existing memories: ${Array.isArray(memory.matches) ? memory.matches.length : 0}. Decide whether to update an existing memory or keep this as a new one.`,
+            data: { id: dropped.id, title: dropped.title, memory },
+          };
+        }
         return {
           text: `Activity promoted to memory: ${dropped.title}`,
-          data: { id: dropped.id, title: dropped.title, memory },
+          data: { id: dropped.id, title: dropped.title, memory: unwrapStoredMemoryResult(memory) },
         };
       } catch (error) {
         services.activity.add({ title: dropped.title, items: dropped.items, reminderId: dropped.reminderId });
@@ -500,7 +506,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_memory_remember",
-    description: "Store a long-term structured memory that should influence future judgment. Do not use this for diary-like logs or tiny one-off details.",
+    description: "Store a long-term structured memory that should influence future judgment. Do not use this for diary-like logs or tiny one-off details. If a near-duplicate existing memory is found, this tool returns candidate matches so you can decide whether to update an existing memory instead.",
     shortHint: "Store a long-term memory.",
     topics: ["memory"],
     inputSchema: {
@@ -520,9 +526,16 @@ const PROJECT_TOOLS = [
     },
     async handler({ services, args }) {
       const result = await services.agentMemory.remember(args);
+      if (result?.action === "review_existing") {
+        return {
+          text: `Possible duplicate memories found: ${Array.isArray(result.matches) ? result.matches.length : 0}. Decide whether to update an existing memory or store a new one.`,
+          data: result,
+        };
+      }
+      const stored = unwrapStoredMemoryResult(result);
       return {
-        text: `Memory stored: ${result.subject}`,
-        data: result,
+        text: `Memory stored: ${stored.subject}`,
+        data: stored,
       };
     },
   },
@@ -1343,6 +1356,13 @@ function isBuiltInToolVisible(toolName, profile) {
     return true;
   }
   return !DEFAULT_HIDDEN_TOOL_NAMES.has(normalizeText(toolName));
+}
+
+function unwrapStoredMemoryResult(result) {
+  if (result?.action === "stored" && result.memory) {
+    return result.memory;
+  }
+  return result;
 }
 
 function normalizeText(value) {

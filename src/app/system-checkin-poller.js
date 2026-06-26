@@ -8,7 +8,7 @@ const { SystemMessageQueueStore } = require("../core/system-message-queue-store"
 const { ObsidianService } = require("../services/obsidian-service");
 const { RuntimeContextStore } = require("../tools/runtime-context-store");
 
-const INTERNAL_CHECKIN_TRIGGER_TEMPLATE = "A quiet pulse fires because you have not contacted %USER% for a while. You thought of her. Review current context and decide whether to send a short natural message now. Only return silent if the user explicitly said not to message, or quiet hours are active. This is not a due reminder; it is a relationship check-in opportunity.";
+const INTERNAL_CHECKIN_TRIGGER_TEMPLATE = "A contact-gap check-in fired because you have not contacted %USER% for a while. Send a short natural message now. Only return silent if the user explicitly said not to message, or quiet hours are active. This is not a due reminder, but it is still a mandatory reach-out trigger once fired.";
 const CHECKIN_SYSTEM_MESSAGE_SOURCE = "contact_gap_pulse";
 const CHECKIN_SYSTEM_MESSAGE_TTL_MS = 30 * 60 * 1000;
 const CONTACT_GAP_MODULE = "contactGapFloor";
@@ -124,7 +124,7 @@ async function runSystemCheckinPoller(config) {
       senderId: target.senderId,
       workspaceRoot: target.workspaceRoot,
       text: checkinTrigger,
-      kind: "pulse",
+      kind: "checkin",
       source: CHECKIN_SYSTEM_MESSAGE_SOURCE,
       createdAt: new Date(nowMs).toISOString(),
       expiresAt: new Date(nowMs + CHECKIN_SYSTEM_MESSAGE_TTL_MS).toISOString(),

@@ -51,24 +51,32 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse" } =
   const body = normalizeText(text);
   const localTime = formatSystemLocalTime(createdAt);
   const effectiveKind = normalizeSystemKind(systemKind);
+  const isReminder = effectiveKind === "reminder";
+  const isCheckin = effectiveKind === "checkin";
   const sections = [
     ...(localTime ? [`[${localTime}]`, ""] : []),
     "SYSTEM ACTION MODE: internal trigger, not user chat.",
     `Turn intent: ${resolveSystemTurnIntent(effectiveKind)}.`,
     `System kind: ${effectiveKind}.`,
-    effectiveKind === "reminder"
+    isReminder
       ? "This is a due reminder. Your default action is to send a message to the user. Do not return silent for a due reminder unless the user already confirmed completion in the current turn."
-      : "This is a pulse-like trigger. Review context and decide whether to contact the user now.",
+      : isCheckin
+        ? "This is a contact-gap check-in. The gap threshold has already been exceeded, so your default action is to send a message to the user now."
+        : "This is a pulse-like trigger. Review context and decide whether it is a good time to reach out now.",
     "Default first step: use cyberboss_pulse_review unless the trigger already gives you enough context.",
     "Activity is the soul of this assistant. Read the situation in this order: current open activities (what is the user doing or about to do?), today's habit state, any Obsidian signal, memory items, whether user contact is useful now, and whether a follow-up is needed.",
-    "For near-term user actions, capture them as open activities with cyberboss_activity_add; the activity auto-binds a check-back reminder. Use a standalone reminder only for far-future non-action follow-ups.",
-    effectiveKind === "reminder"
+    "For near-term user actions, capture them as open activities with cyberboss_activity_add; the activity auto-binds a short-cycle check-back reminder. Same-day ongoing activities should usually stay in the 10-60 minute range unless the user explicitly said much later. Use a standalone reminder only for far-future non-action follow-ups.",
+    isReminder
       ? "Due reminders stay active until explicitly cleared. Do not assume the user already did it just because the reminder fired. If recent context clearly shows completion, list active reminders and clear the matching one. Otherwise, send a message to the user now."
-      : "If you have not contacted the user for a while, treat this as a real opportunity to reach out. Only return silent if the user explicitly said not to message, or quiet hours are active.",
+      : isCheckin
+        ? "This check-in was only queued after quiet-hours and nearby-reminder guards were satisfied. Send a short grounded check-in now. Only return silent if current context clearly shows the user explicitly asked for no message."
+        : "If you have not contacted the user for a while, treat this as a real opportunity to reach out. Only return silent if the user explicitly said not to message, or quiet hours are active.",
     "Habit closure matters. If a habit is still incomplete today, either nudge now or set a reminder to check later. If the user already confirmed completion or clean abandonment, prefer writing the habit state.",
-    effectiveKind === "reminder"
+    isReminder
       ? "For a due reminder, sending the user a message is itself a complete action. Do not require extra private maintenance work before finishing the turn."
-      : "For a pulse, silence is allowed only when the user explicitly said not to message, or quiet hours are active.",
+      : isCheckin
+        ? "For this fired contact-gap check-in, sending the user a message is itself a complete action. Do not downgrade it into private reflection or optional review."
+        : "For a pulse, silence is allowed only when the user explicitly said not to message, or quiet hours are active.",
     "Return exactly one JSON object after any tool calls:",
     "{\"action\":\"silent\"}",
     "{\"action\":\"send_message\",\"message\":\"<one short natural WeChat message>\"}",

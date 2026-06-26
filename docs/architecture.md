@@ -7,7 +7,7 @@
 - reading config
 - choosing which channel / runtime / integrations to use
 - orchestrating capabilities instead of implementing concrete protocols
-- owning trigger semantics such as user message, pulse, reminder, and approval flow
+- owning trigger semantics such as user message, pulse, checkin, reminder, and approval flow
 
 ## Channel Adapters
 
@@ -22,7 +22,7 @@ Responsible for:
 Not responsible for:
 
 - Codex / Claude Code thread logic
-- reminder / habit / seedbox / timeline / diary logic
+- reminder / habit / memory / timeline / diary logic
 
 ## Runtime Adapters
 
@@ -47,10 +47,8 @@ The main local behavior/state modules are:
   Follow-up substrate and future re-entry queue
 - `habit`
   Daily completion state, history, and heatmap-oriented tracking
-- `seedbox`
-  Future-useful internal carry-over material that should survive across turns without becoming a hard task board
 - `memory`
-  Durable structured facts and preferences
+  Unified structured carry-over store for durable facts, preferences, and lifecycle material such as `wishseed` and `concern`
 
 These modules are coordinated by app/runtime flow rather than treated as separate products.
 

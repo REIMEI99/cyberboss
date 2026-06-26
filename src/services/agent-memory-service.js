@@ -1,7 +1,7 @@
 const fs = require("fs");
 const path = require("path");
 const crypto = require("crypto");
-const { rankByEmbedding } = require("./embedding-service");
+const { cosineSimilarity, rankByEmbedding } = require("./embedding-service");
 
 const MEMORY_TYPES = new Set([
   "preference", "fact", "principle", "relationship", "project", "self",
@@ -15,6 +15,8 @@ class AgentMemoryService {
     this.config = config;
     this.embeddingService = embeddingService;
     this.filePath = config.agentMemoryFile;
+    this.memoryDedupThreshold = normalizeThreshold(config.memoryDedupThreshold);
+    this.memoryDedupLimit = normalizeLimit(config.memoryDedupLimit || 3);
     this.state = { memories: [] };
     this.ensureParentDirectory();
     this.loadSync();
@@ -119,10 +121,17 @@ class AgentMemoryService {
       throw new Error("Invalid memory. Provide at least type, subject, and content.");
     }
     await applyEmbedding(this, memory);
+    const duplicateReview = this.buildDuplicateReview(memory);
+    if (duplicateReview) {
+      return duplicateReview;
+    }
     this.state.memories.push(memory);
     this.state.memories.sort(compareMemories);
     this.save();
-    return stripEmbedding(memory);
+    return {
+      action: "stored",
+      memory: stripEmbedding(memory),
+    };
   }
 
   async complete({ id = "", notes = "" } = {}) {
@@ -335,6 +344,33 @@ class AgentMemoryService {
     }
     return { reindexed, skipped: false, reason: "" };
   }
+
+  buildDuplicateReview(memory) {
+    if (!shouldRunMemoryDedup(this, memory)) {
+      return null;
+    }
+    const matches = this.state.memories
+      .filter((item) => item.status === "active")
+      .filter((item) => !item.completedAt)
+      .filter((item) => !isExpired(item))
+      .filter((item) => Array.isArray(item.embedding) && item.embedding.length === memory.embedding.length)
+      .map((item) => ({
+        ...stripEmbedding(item),
+        similarity: cosineSimilarity(memory.embedding, item.embedding),
+      }))
+      .filter((item) => item.similarity >= this.memoryDedupThreshold)
+      .sort((left, right) => right.similarity - left.similarity || compareMemories(left, right))
+      .slice(0, this.memoryDedupLimit);
+    if (!matches.length) {
+      return null;
+    }
+    return {
+      action: "review_existing",
+      threshold: this.memoryDedupThreshold,
+      proposedMemory: stripEmbedding(memory),
+      matches,
+    };
+  }
 }
 
 async function applyEmbedding(service, memory) {
@@ -527,6 +563,21 @@ function normalizeConfidence(value) {
     return 0.5;
   }
   return Math.max(0, Math.min(1, parsed));
+}
+
+function normalizeThreshold(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return 0.92;
+  }
+  return Math.max(0, Math.min(1, parsed));
+}
+
+function shouldRunMemoryDedup(service, memory) {
+  return service.embeddingService?.isConfigured?.() === true
+    && service.memoryDedupThreshold > 0
+    && Array.isArray(memory?.embedding)
+    && memory.embedding.length > 0;
 }
 
 function normalizeTimeMs(value) {

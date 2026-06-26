@@ -1,4 +1,4 @@
-# Reminder, Habit, Seedbox Philosophy
+# Reminder, Habit, Memory Philosophy
 
 ## Goal
 
@@ -51,28 +51,28 @@ Habit is not:
 - streak pressure for its own sake
 - a generic catch-all queue
 
-### Seedbox
+### Memory
 
-Seedbox stores unresolved, unexpanded, or someday-useful material that should survive across turns. It is organized into two kinds:
+Memory stores unresolved, unexpanded, or someday-useful material that should survive across turns, along with durable long-term knowledge. Relevant carry-over kinds include:
 
 - `wishseed`: future things to do, items to try or buy, content to read or watch, saved links, half-formed ideas, and anything the user may want to revisit later.
 - `concern`: unresolved worries, risks, or heavy matters that should stay on the radar.
 
-Typical seedbox contents:
+Typical lifecycle memory contents:
 
 - a worry the user has not unpacked yet (`concern`)
 - something she wants to learn or try later (`wishseed`)
 - a possible future thread (`wishseed`)
 - a find, link, quote, product, or idea worth keeping (`wishseed`)
 
-Seedbox is not:
+This lifecycle layer is not:
 
 - a sprint board
 - a strict task manager
 - the default timing mechanism
 - a place for model-facing workflow fields like `status`, `priority`, or `nextAction`
 
-Reminder owns timing. Seedbox owns preservation.
+Reminder owns timing. Memory owns preservation.
 
 ## Trigger Model
 
@@ -82,25 +82,25 @@ When the user speaks, the model should answer first, then decide whether the mes
 
 - a follow-up anchor -> `reminder`
 - a habit state change -> `habit`
-- a future-useful preserved thread -> `seedbox`
+- a future-useful preserved thread -> `memory` (usually `wishseed` or `concern`)
 - durable long-term knowledge -> `memory`
 
 Important closure rules:
 
 - if the user says a habit is done, skipped, or abandoned, tracked state should usually change
 - if the user opens a loop that should be revisited, create a reminder or clearly decide not to
-- if the user drops future-useful material, capture it in seedbox
+- if the user drops future-useful material, capture it in memory, usually as `wishseed` or `concern`
 
 ### Pulse
 
-Pulse is a review opportunity, not a duty to speak.
+Pulse is a soft review trigger, not a duty to speak.
 
 Pulse should usually check:
 
 1. current context
 2. today’s habit state
 3. relevant Obsidian signal
-4. seedbox and other ongoing internal material
+4. memory and other ongoing internal material
 5. whether contact is useful now
 6. whether a reminder should be scheduled
 
@@ -135,9 +135,9 @@ When habit is relevant, the model should usually do one of:
 2. schedule a reminder
 3. mark the state explicitly
 
-### Seedbox Preservation Rule
+### Lifecycle Memory Rule
 
-If something matters enough to revisit but not enough to formalize, prefer `seedbox` over durable memory.
+If something matters enough to revisit but not enough to formalize as a stable fact or preference, prefer `memory` with a lifecycle type such as `wishseed` or `concern`.
 
 ## Naming Notes
 
@@ -147,19 +147,19 @@ Keep `reminder` as the implementation and tool name. “Follow-up” is the prod
 
 ### Pulse vs checkin
 
-The current split is intentional enough for now:
+The current split is behavioral:
 
-- `pulse` = model-facing trigger semantics
-- `checkin` = host scheduler/config naming
+- `pulse` = model-facing soft-trigger semantics for internal review turns such as audits, location/context nudges, or manual system triggers
+- `checkin` = host scheduler/config naming for interval- or gap-driven reach-out
 
-This can be cleaned up later, but it is lower priority than behavior correctness.
+In particular, contact-gap triggering is now treated as `checkin`, not as ordinary `pulse`.
 
 ## Design Test
 
 The design is behaving correctly if these questions have clean answers:
 
-1. “Should this survive later?” -> usually `reminder` or `seedbox`
+1. “Should this survive later?” -> usually `reminder` or `memory` (`wishseed` / `concern`)
 2. “Should this count as done today?” -> `habit`
 3. “Should this become durable knowledge?” -> `memory`
-4. “Should I message now?” -> `pulse` or `reminder` judgment
+4. “Should I message now?” -> `pulse`, `checkin`, or `reminder` judgment depending on trigger strength
 5. “If not now, how do I come back later?” -> usually `reminder`

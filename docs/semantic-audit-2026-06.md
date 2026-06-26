@@ -6,7 +6,7 @@ This audit records the post-refactor semantic state of:
 
 - `reminder`
 - `habit`
-- `seedbox`
+- `memory` lifecycle material (`wishseed` / `concern`)
 - `pulse` vs legacy `checkin`
 
 This is a behavior and naming audit, not a package-boundary audit.
@@ -15,31 +15,23 @@ This is a behavior and naming audit, not a package-boundary audit.
 
 - `reminder`: aligned as the default follow-up substrate
 - `habit`: aligned in state model; remaining risk is missed closure in real conversations
-- `seedbox`: aligned as internal carry-over material, not a work queue
+- `memory` lifecycle material: aligned as internal carry-over material, not a work queue
 - `pulse`: aligned as the model-facing trigger semantics
 - `checkin`: still the host-side scheduler/config naming
 
 ## What Was Completed
 
-### Seedbox rename and semantics
+### Lifecycle memory convergence
 
-Completed changes:
+Current reality:
 
-- service renamed to `src/services/seedbox-service.js`
-- project service handle renamed from `agentTask` to `seedbox`
-- tool family renamed to:
-  - `cyberboss_seedbox_create`
-  - `cyberboss_seedbox_list`
-  - `cyberboss_seedbox_update`
-  - `cyberboss_seedbox_complete`
-- default storage file renamed to `seedbox.json`
-- legacy read compatibility preserved through `agent-tasks.json`
-- pulse review now refers to `seedbox`
-- prompt and dispatcher wording now refer to `seedbox`
+- future-useful loose material now converges on unified `memory`
+- `wishseed` and `concern` are lifecycle memory types, not a separate product surface
+- legacy `seedbox` state is migrated into `agent-memories.json`
 
 Semantic result:
 
-- the module is now described and exposed as future-useful carry-over material
+- future-useful carry-over material now sits inside the memory system
 - reminder remains the owner of time-based re-entry
 - memory remains the owner of durable facts
 
@@ -54,7 +46,7 @@ Completed changes:
 Semantic result:
 
 - there is no longer a competing “interesting finds” bucket in the active model workflow
-- future-useful loose material now converges on `seedbox`
+- future-useful loose material now converges on lifecycle memory
 
 ### Reminder closure strengthening
 
@@ -120,11 +112,11 @@ Likely stale areas:
 Assessment:
 
 - lower risk than behavior drift
-- worth cleaning once the seedbox/habit split settles
+- worth cleaning once the memory lifecycle wording settles
 
 ## Audit Conclusion
 
-The old `task` vs `seedbox` semantic mismatch is resolved in the active code path.
+The old `task` vs `seedbox` semantic mismatch is resolved in the active code path, but some historical docs may still use `seedbox` as a legacy label for what is now lifecycle memory.
 
 The main remaining semantic work is now:
 

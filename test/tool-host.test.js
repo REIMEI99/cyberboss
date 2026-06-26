@@ -412,6 +412,39 @@ test("tool host exposes memory tools including complete", async () => {
   assert.equal(completeResult.text, "Memory completed: Housing plan");
 });
 
+test("tool host returns duplicate memory review results", async () => {
+  const host = createHost();
+  host.services.agentMemory.remember = async () => ({
+    action: "review_existing",
+    threshold: 0.92,
+    proposedMemory: {
+      type: "preference",
+      subject: "Coffee order",
+      content: "Prefers oat milk latte.",
+    },
+    matches: [{
+      id: "mem-1",
+      type: "preference",
+      subject: "Coffee order",
+      content: "Prefers oat milk latte.",
+      similarity: 0.97,
+      status: "active",
+      createdAt: "2026-06-21T00:00:00.000Z",
+      updatedAt: "2026-06-21T00:00:00.000Z",
+    }],
+  });
+
+  const result = await host.invokeTool("cyberboss_memory_remember", {
+    type: "preference",
+    subject: "Morning drink",
+    content: "Usually wants an oat milk latte.",
+  }, {});
+
+  assert.match(result.text, /Possible duplicate memories found: 1/);
+  assert.equal(result.data.action, "review_existing");
+  assert.equal(result.data.matches[0].id, "mem-1");
+});
+
 test("tool host exposes Obsidian random excerpt", async () => {
   const host = createHost();
   const excerptResult = await host.invokeTool("cyberboss_obsidian_random_daily_excerpt", {}, {});
