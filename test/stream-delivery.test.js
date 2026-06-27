@@ -1,4 +1,4 @@
-const test = require("node:test");
+﻿const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const { StreamDelivery } = require("../src/core/stream-delivery");
@@ -81,6 +81,76 @@ test("system silent JSON is suppressed", async () => {
   assert.deepEqual(sent, []);
 });
 
+test("reminder system reply falls back to a natural message when model returns silent", async () => {
+  const { sent, streamDelivery } = createHarness();
+  streamDelivery.queueReplyTargetForThread("thread-1r", {
+    userId: "user-1r",
+    contextToken: "ctx-1r",
+    provider: "system",
+    systemKind: "reminder",
+  });
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-1r",
+    turnId: "turn-1r",
+    itemId: "item-1r",
+    text: "{\"action\":\"silent\"}",
+  });
+
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /来提醒你一下|刚才那件事现在怎么样了/);
+  const outcome = streamDelivery.consumeCompletedSystemReplyOutcome("thread-1r:turn-1r");
+  assert.equal(outcome?.kind, "send_message");
+  assert.equal(outcome?.fallback, true);
+});
+
+test("checkin system reply falls back to a natural message when model returns silent", async () => {
+  const { sent, streamDelivery } = createHarness();
+  streamDelivery.queueReplyTargetForThread("thread-1c", {
+    userId: "user-1c",
+    contextToken: "ctx-1c",
+    provider: "system",
+    systemKind: "checkin",
+  });
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-1c",
+    turnId: "turn-1c",
+    itemId: "item-1c",
+    text: "{\"action\":\"silent\"}",
+  });
+
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /刚想起你|状态还好吗/);
+  const outcome = streamDelivery.consumeCompletedSystemReplyOutcome("thread-1c:turn-1c");
+  assert.equal(outcome?.kind, "send_message");
+  assert.equal(outcome?.fallback, true);
+});
+
+test("random pulse system reply falls back to a natural message when model returns silent", async () => {
+  const { sent, streamDelivery } = createHarness();
+  streamDelivery.queueReplyTargetForThread("thread-1p", {
+    userId: "user-1p",
+    contextToken: "ctx-1p",
+    provider: "system",
+    systemKind: "pulse",
+    systemSource: "random_pulse",
+  });
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-1p",
+    turnId: "turn-1p",
+    itemId: "item-1p",
+    text: "{\"action\":\"silent\"}",
+  });
+
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /刚想到你最近生活里那几条线|最近还在那件事上吗/);
+  const outcome = streamDelivery.consumeCompletedSystemReplyOutcome("thread-1p:turn-1p");
+  assert.equal(outcome?.kind, "send_message");
+  assert.equal(outcome?.fallback, true);
+});
+
 test("system send_message JSON sends only the message text", async () => {
   const { sent, streamDelivery } = createHarness();
   streamDelivery.queueReplyTargetForThread("thread-2", {
@@ -93,13 +163,13 @@ test("system send_message JSON sends only the message text", async () => {
     threadId: "thread-2",
     turnId: "turn-2",
     itemId: "item-2",
-    text: "{\"action\":\"send_message\",\"message\":\"在呢\"}",
+    text: "{\"action\":\"send_message\",\"message\":\"鍦ㄥ憿\"}",
   });
 
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0], {
     userId: "user-2",
-    text: "在呢",
+    text: "鍦ㄥ憿",
     contextToken: "ctx-2",
   });
 });
@@ -186,7 +256,7 @@ test("claudecode system plain text still rejects code and protocol fragments", a
   await runCompletedTurnWithResultOnly(streamDelivery, {
     threadId: "thread-2unsafe-b",
     turnId: "turn-2unsafe-b",
-    text: "好的。analysis to=functions.exec_command code?",
+    text: "濂界殑銆俛nalysis to=functions.exec_command code?",
   });
 
   assert.deepEqual(sent, []);
@@ -329,12 +399,12 @@ test("turn.completed result text is delivered when no reply items were emitted",
   await runCompletedTurnWithResultOnly(streamDelivery, {
     threadId: "thread-result",
     turnId: "turn-result",
-    text: "工具执行完了，这是最终回复",
+    text: "工具执行完了，这是最终回执",
   });
 
   assert.deepEqual(sent, [{
     userId: "user-result",
-    text: "工具执行完了，这是最终回复",
+    text: "工具执行完了，这是最终回执",
     contextToken: "ctx-result",
   }]);
 });
@@ -399,7 +469,7 @@ test("plain weixin reply sends finalized item text even if earlier streaming tex
   });
   await streamDelivery.handleRuntimeEvent({
     type: "runtime.reply.delta",
-    payload: { threadId: "thread-4b", turnId: "turn-4b", itemId: "item-4b", text: "先写很长的一版" },
+    payload: { threadId: "thread-4b", turnId: "turn-4b", itemId: "item-4b", text: "先写很长的一段" },
   });
   await streamDelivery.handleRuntimeEvent({
     type: "runtime.reply.completed",
@@ -510,7 +580,7 @@ test("plain reply prepends deferred prefix to the next reply", async () => {
   });
   streamDelivery.setDeferredReplyPrefix(
     "binding-7",
-    `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系`
+    `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系`
   );
 
   await runCompletedTurn(streamDelivery, {
@@ -523,7 +593,7 @@ test("plain reply prepends deferred prefix to the next reply", async () => {
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0], {
     userId: "user-7",
-    text: `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系\n\n${CURRENT_REPLY_HEADER}\n这是新一轮自动回复`,
+    text: `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系\n\n${CURRENT_REPLY_HEADER}\n这是新一轮自动回复`,
     contextToken: "ctx-7",
     preserveBlock: true,
   });
@@ -539,7 +609,7 @@ test("plain reply with deferred prefix is sent as soon as the first item is fina
   });
   streamDelivery.setDeferredReplyPrefix(
     "binding-8",
-    `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系`
+    `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系`
   );
 
   await streamDelivery.handleRuntimeEvent({
@@ -559,8 +629,11 @@ test("plain reply with deferred prefix is sent as soon as the first item is fina
   assert.equal(sent.length, 1);
   assert.deepEqual(sent[0], {
     userId: "user-8",
-    text: `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系\n\n${CURRENT_REPLY_HEADER}\n第一段`,
+    text: `${DEFERRED_REPLY_NOTICE}\n\n${DEFERRED_PLAIN_REPLY_HEADER}\n旧尾段\n${DEFERRED_SYSTEM_REPLY_HEADER}\n中间主动联系\n\n${CURRENT_REPLY_HEADER}\n第一段`,
     contextToken: "ctx-8",
     preserveBlock: true,
   });
 });
+
+
+

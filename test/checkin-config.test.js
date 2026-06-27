@@ -10,6 +10,12 @@ const {
   DEFAULT_MAX_INTERVAL_MS,
   parseCheckinRangeMinutes,
 } = require("../src/core/checkin-config-store");
+const {
+  PulseConfigStore,
+  DEFAULT_MIN_INTERVAL_MS: DEFAULT_PULSE_MIN_INTERVAL_MS,
+  DEFAULT_MAX_INTERVAL_MS: DEFAULT_PULSE_MAX_INTERVAL_MS,
+  parsePulseRangeMinutes,
+} = require("../src/core/pulse-config-store");
 const { CyberbossApp } = require("../src/core/app");
 
 function createStore() {
@@ -17,11 +23,23 @@ function createStore() {
   return new CheckinConfigStore({ filePath: path.join(dir, "checkin-config.json") });
 }
 
+function createPulseStore() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-pulse-test-"));
+  return new PulseConfigStore({ filePath: path.join(dir, "pulse-config.json") });
+}
+
 test("parseCheckinRangeMinutes accepts min-max minute ranges", () => {
   assert.deepEqual(parseCheckinRangeMinutes("7-21"), { minMinutes: 7, maxMinutes: 21 });
   assert.deepEqual(parseCheckinRangeMinutes("5 - 10"), { minMinutes: 5, maxMinutes: 10 });
   assert.equal(parseCheckinRangeMinutes("10-3"), null);
   assert.equal(parseCheckinRangeMinutes("abc"), null);
+});
+
+test("parsePulseRangeMinutes accepts min-max minute ranges", () => {
+  assert.deepEqual(parsePulseRangeMinutes("180-360"), { minMinutes: 180, maxMinutes: 360 });
+  assert.deepEqual(parsePulseRangeMinutes("45 - 90"), { minMinutes: 45, maxMinutes: 90 });
+  assert.equal(parsePulseRangeMinutes("30-10"), null);
+  assert.equal(parsePulseRangeMinutes("abc"), null);
 });
 
 test("checkin config store falls back to defaults and persists overrides", () => {
@@ -34,6 +52,19 @@ test("checkin config store falls back to defaults and persists overrides", () =>
   assert.deepEqual(store.getRange(), {
     minIntervalMs: 4 * 60_000,
     maxIntervalMs: 25 * 60_000,
+  });
+});
+
+test("pulse config store falls back to defaults and persists overrides", () => {
+  const store = createPulseStore();
+  assert.deepEqual(store.getRange(), {
+    minIntervalMs: DEFAULT_PULSE_MIN_INTERVAL_MS,
+    maxIntervalMs: DEFAULT_PULSE_MAX_INTERVAL_MS,
+  });
+  store.setRange({ minIntervalMs: 120 * 60_000, maxIntervalMs: 240 * 60_000 });
+  assert.deepEqual(store.getRange(), {
+    minIntervalMs: 120 * 60_000,
+    maxIntervalMs: 240 * 60_000,
   });
 });
 
@@ -62,6 +93,39 @@ test("handleCheckinCommand stores the new range and replies in English", async (
   });
   assert.equal(sent.length, 1);
   assert.equal(sent[0].text, "✅ Check-in interval reset to 7-21 minutes and will apply on the next polling cycle.");
+});
+
+test("handlePulseCommand stores an independent range and replies in English", async () => {
+  const sent = [];
+  const checkinStore = createStore();
+  const pulseStore = createPulseStore();
+  const appLike = {
+    checkinConfigStore: checkinStore,
+    pulseConfigStore: pulseStore,
+    channelAdapter: {
+      async sendText(payload) {
+        sent.push(payload);
+      },
+    },
+  };
+
+  await CyberbossApp.prototype.handlePulseCommand.call(appLike, {
+    senderId: "user-2",
+    contextToken: "ctx-2",
+  }, {
+    args: "180-360",
+  });
+
+  assert.deepEqual(pulseStore.getRange(), {
+    minIntervalMs: 180 * 60_000,
+    maxIntervalMs: 360 * 60_000,
+  });
+  assert.deepEqual(checkinStore.getRange(), {
+    minIntervalMs: DEFAULT_MIN_INTERVAL_MS,
+    maxIntervalMs: DEFAULT_MAX_INTERVAL_MS,
+  });
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].text, "✅ Pulse interval reset to 180-360 minutes and will apply on the next polling cycle.");
 });
 
 test("handleChunkCommand reports current value and persists updates through the channel adapter", async () => {

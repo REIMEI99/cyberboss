@@ -421,7 +421,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_activity_drop",
-    description: "Drop an open activity â€?the user won't do it, or it's no longer relevant. The activity is removed immediately. The bound check-back reminder is cleared automatically.",
+    description: "Drop an open activity - the user won't do it, or it's no longer relevant. The activity is removed immediately. The bound check-back reminder is cleared automatically.",
     shortHint: "Drop an open activity.",
     topics: ["activity"],
     inputSchema: {
@@ -486,7 +486,7 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_activity_list_done",
-    description: "List recently completed activities (done history). Debug use only â€?not for routine context.",
+    description: "List recently completed activities (done history). Debug use only - not for routine context.",
     shortHint: "List done activities (debug).",
     topics: ["activity"],
     inputSchema: {
@@ -1455,7 +1455,7 @@ function buildPulseReviewSummary({
   const openActivities = Array.isArray(activities?.activities) ? activities.activities : [];
   const durableMemories = Array.isArray(memories?.memories) ? memories.memories : [];
 
-  // Activity analysis â€?first priority regardless of turn intent.
+  // Activity analysis - first priority regardless of turn intent.
   const isUserMessage = turnIntent === "user_message";
   const oldestActivity = openActivities.length
     ? openActivities.reduce((oldest, item) => {
@@ -1558,20 +1558,28 @@ function buildPulseReviewSummary({
   }
 
   // Habit follow-up.
-  if (!shouldContactForReminder && incompleteHabits.length > 0) {
+  if (incompleteHabits.length > 0) {
     followupOpportunity = {
       shouldSetReminder: true,
-      reason: shouldContactForHabit
-        ? "an incomplete habit matters today; either remind the user now or schedule a follow-up reminder"
-        : "at least one habit is still incomplete today, so a follow-up reminder is usually warranted",
+      reason: isReminder
+        ? (shouldContactForHabit
+            ? "a habit is still incomplete today; after handling the current reminder, either nudge the user or schedule a later habit follow-up if one is not already active"
+            : "at least one habit is still incomplete today; after the current reminder, a later habit follow-up is usually warranted")
+        : (shouldContactForHabit
+            ? "an incomplete habit matters today; either remind the user now or schedule a follow-up reminder"
+            : "at least one habit is still incomplete today, so a follow-up reminder is usually warranted"),
       reminderText: topIncompleteHabit
         ? `Check whether ${topIncompleteHabit.habit.title} is still undone today, and either remind her or mark the day cleanly.`
         : "Check whether today's remaining habits still need a reminder or a clean reset.",
       suggestedDelayMinutes: shouldContactForHabit ? 90 : 180,
     };
   }
-  if (followupOpportunity.shouldSetReminder && !shouldContactForReminder) {
-    recommendedPrivateActions.push("set a reminder for today's incomplete habit instead of letting it disappear");
+  if (followupOpportunity.shouldSetReminder) {
+    recommendedPrivateActions.push(
+      isReminder
+        ? "after handling the current reminder, set a later reminder for today's incomplete habit if it is not already covered"
+        : "set a reminder for today's incomplete habit instead of letting it disappear"
+    );
   }
 
   // Obsidian review (only surfaced for non-user-message turns).

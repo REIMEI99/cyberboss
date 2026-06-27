@@ -32,6 +32,7 @@ function readConfig() {
     systemMessageQueueFile: path.join(stateDir, "system-message-queue.json"),
     deferredSystemReplyQueueFile: path.join(stateDir, "deferred-system-replies.json"),
     checkinConfigFile: path.join(stateDir, "checkin-config.json"),
+    pulseConfigFile: path.join(stateDir, "pulse-config.json"),
     seedboxFile: path.join(stateDir, "seedbox.json"),
     legacyTaskFile: path.join(stateDir, "agent-tasks.json"),
     agentMemoryFile: path.join(stateDir, "agent-memories.json"),

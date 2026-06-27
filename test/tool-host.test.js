@@ -3,9 +3,8 @@ const assert = require("node:assert/strict");
 
 const { ProjectToolHost } = require("../src/tools/tool-host");
 
-function createHost() {
-  return new ProjectToolHost({
-    services: {
+function createHost({ services: serviceOverrides = {}, runtimeContextStore = undefined, config = undefined } = {}) {
+  const baseServices = {
       diary: {
         async append(args) {
           return { filePath: "/tmp/diary.md", ...args };
@@ -343,14 +342,20 @@ function createHost() {
           };
         },
       },
+    };
+  return new ProjectToolHost({
+    services: {
+      ...baseServices,
+      ...serviceOverrides,
     },
-    runtimeContextStore: {
+    runtimeContextStore: runtimeContextStore || {
       resolveActiveContext() {
         return {};
       },
       getPulseExposureModule() { return null; },
       setPulseExposureModule() {},
     },
+    config: config || undefined,
   });
 }
 
@@ -688,4 +693,37 @@ test("pulse review activity-first recommendedPrivateActions", async () => {
   assert.ok(actions.length > 0);
   assert.ok(actions.some((a) => a.includes("activit")), "should include an activity-related action");
   assert.equal(result.data.obsidian.source, "skipped");
+});
+
+test("pulse review keeps habit followup opportunity on reminder turns", async () => {
+  const host = createHost({
+    services: {
+      habitProvider: {
+        getPulseSnapshot() {
+          return {
+            habitStatus: {
+              date: "2026-06-19",
+              count: 1,
+              habits: [{ habit: { id: "habit-1", title: "Eat supplements" }, dailyState: "incomplete" }],
+            },
+            habitSuggestion: { shouldContactUser: true, reason: "not completed today" },
+          };
+        },
+      },
+    },
+  });
+  const result = await host.invokeTool("cyberboss_pulse_review", {
+    turnIntent: "reminder",
+    context: "checking in about another due reminder",
+    includeObsidianExcerpt: false,
+    includeMemories: false,
+    includeActivities: false,
+  }, {});
+
+  assert.equal(result.data.followupOpportunity.shouldSetReminder, true);
+  assert.match(result.data.followupOpportunity.reason, /habit/i);
+  assert.ok(
+    result.data.recommendedPrivateActions.some((a) => /incomplete habit/i.test(a)),
+    "should keep a habit follow-up action even during reminder turns"
+  );
 });

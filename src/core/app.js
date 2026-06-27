@@ -23,6 +23,7 @@ const {
   buildWeixinHelpText,
 } = require("./command-registry");
 const { CheckinConfigStore, parseCheckinRangeMinutes, resolveDefaultCheckinRange } = require("./checkin-config-store");
+const { PulseConfigStore, parsePulseRangeMinutes, resolveDefaultPulseRange } = require("./pulse-config-store");
 const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("./default-targets");
 const { StreamDelivery } = require("./stream-delivery");
 const { ThreadStateStore } = require("./thread-state-store");
@@ -79,6 +80,7 @@ class CyberbossApp {
     this.systemMessageQueue = new SystemMessageQueueStore({ filePath: config.systemMessageQueueFile });
     this.deferredSystemReplyQueue = new DeferredSystemReplyStore({ filePath: config.deferredSystemReplyQueueFile });
     this.checkinConfigStore = new CheckinConfigStore({ filePath: config.checkinConfigFile });
+    this.pulseConfigStore = new PulseConfigStore({ filePath: config.pulseConfigFile });
     this.timelineScreenshotQueue = new TimelineScreenshotQueueStore({ filePath: config.timelineScreenshotQueueFile });
     this.reminderQueue = new ReminderQueueStore({ filePath: config.reminderQueueFile });
     this.turnGateStore = new TurnGateStore();
@@ -491,6 +493,8 @@ class CyberbossApp {
         userId: prepared.senderId,
         contextToken: prepared.contextToken,
         provider: prepared.provider,
+        systemKind: prepared.provider === "system" ? prepared.systemKind : "",
+        systemSource: prepared.provider === "system" ? prepared.systemSource : "",
       };
       if (turn.turnId) {
         this.trackPendingPostTurnAudit({
@@ -1014,6 +1018,9 @@ class CyberbossApp {
       case "checkin":
         await this.handleCheckinCommand(normalized, command);
         return;
+      case "pulse":
+        await this.handlePulseCommand(normalized, command);
+        return;
       case "chunk":
         await this.handleChunkCommand(normalized, command);
         return;
@@ -1338,6 +1345,39 @@ class CyberbossApp {
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
       text: `✅ Check-in interval reset to ${parsedRange.minMinutes}-${parsedRange.maxMinutes} minutes and will apply on the next polling cycle.`,
+      contextToken: normalized.contextToken,
+    });
+  }
+
+  async handlePulseCommand(normalized, command) {
+    const rangeInput = normalizeCommandArgument(command.args);
+    if (!rangeInput) {
+      const currentRange = this.pulseConfigStore.getRange(resolveDefaultPulseRange());
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: `⏰ Current pulse interval is ${Math.round(currentRange.minIntervalMs / 60000)}-${Math.round(currentRange.maxIntervalMs / 60000)} minutes.`,
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    const parsedRange = parsePulseRangeMinutes(rangeInput);
+    if (!parsedRange) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: "💡 Usage: /pulse <min>-<max>",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    this.pulseConfigStore.setRange({
+      minIntervalMs: parsedRange.minMinutes * 60_000,
+      maxIntervalMs: parsedRange.maxMinutes * 60_000,
+    });
+    await this.channelAdapter.sendText({
+      userId: normalized.senderId,
+      text: `✅ Pulse interval reset to ${parsedRange.minMinutes}-${parsedRange.maxMinutes} minutes and will apply on the next polling cycle.`,
       contextToken: normalized.contextToken,
     });
   }

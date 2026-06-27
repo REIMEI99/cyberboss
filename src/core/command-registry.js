@@ -129,6 +129,13 @@ const COMMAND_GROUPS = [
         status: "active",
       },
       {
+        action: "system.pulse_range",
+        summary: "Reset the random life-pulse range in minutes",
+        terminal: [],
+        weixin: ["/pulse <min>-<max>"],
+        status: "active",
+      },
+      {
         action: "channel.chunk_min",
         summary: "Adjust the minimum short-chunk merge size for WeChat replies",
         terminal: [],

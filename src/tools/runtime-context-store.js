@@ -36,6 +36,7 @@ class RuntimeContextStore {
     accountId = "",
     senderId = "",
   } = {}) {
+    this.load();
     const normalizedWorkspaceRoot = normalizeText(workspaceRoot);
     if (!normalizedWorkspaceRoot) {
       return null;
@@ -58,6 +59,7 @@ class RuntimeContextStore {
   }
 
   resolveActiveContext({ workspaceRoot = "", runtimeId = "" } = {}) {
+    this.load();
     const normalizedWorkspaceRoot = normalizeText(workspaceRoot);
     if (normalizedWorkspaceRoot) {
       const exact = this.state.contextsByWorkspaceRoot?.[normalizedWorkspaceRoot];
@@ -81,6 +83,7 @@ class RuntimeContextStore {
   }
 
   getPulseExposureState(workspaceRoot = "") {
+    this.load();
     const key = normalizeWorkspaceKey(workspaceRoot);
     const raw = this.state.pulseExposureByWorkspaceRoot?.[key];
     if (!raw || typeof raw !== "object") {
@@ -108,6 +111,7 @@ class RuntimeContextStore {
   }
 
   setPulseExposureModule(workspaceRoot = "", moduleName = "", patch = {}) {
+    this.load();
     const key = normalizeWorkspaceKey(workspaceRoot);
     const normalizedModuleName = normalizeText(moduleName);
     if (!normalizedModuleName) {

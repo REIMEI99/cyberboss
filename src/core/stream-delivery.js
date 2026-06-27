@@ -1,4 +1,4 @@
-const { sanitizeProtocolLeakText } = require("../adapters/runtime/codex/protocol-leak-monitor");
+﻿const { sanitizeProtocolLeakText } = require("../adapters/runtime/codex/protocol-leak-monitor");
 
 const CURRENT_REPLY_HEADER = "===== 本轮模型回复 =====";
 
@@ -337,7 +337,11 @@ class StreamDelivery {
     }
 
     const replyText = buildReplyText(state, { completedOnly: false });
-    const resolved = resolveSystemReplyDelivery(replyText, this.systemReplyPolicy);
+    const policy = createSystemReplyPolicyForTarget(this.runtimeId, {
+      systemKind: state.replyTarget?.systemKind || "",
+      systemSource: state.replyTarget?.systemSource || "",
+    });
+    const resolved = resolveSystemReplyDelivery(replyText, policy);
     if (resolved.kind === "silent") {
       this.markAllItemsSent(state);
       this.completedSystemReplyOutcomeByRunKey.set(state.runKey, { kind: "silent" });
@@ -348,6 +352,29 @@ class StreamDelivery {
     }
 
     if (resolved.kind !== "send_message") {
+      const fallbackMessage = buildMandatorySystemFallbackMessage(
+        state.replyTarget?.systemKind || "",
+        state.replyTarget?.systemSource || ""
+      );
+      if (fallbackMessage) {
+        state.sendChain = state.sendChain.then(async () => {
+          await this.sendSystemReply(state, fallbackMessage);
+          this.markAllItemsSent(state);
+          this.completedSystemReplyOutcomeByRunKey.set(state.runKey, {
+            kind: "send_message",
+            fallback: true,
+            reason: resolved.reason || "invalid structured action",
+          });
+          console.warn(
+            `[cyberboss] fallback system reply thread=${state.threadId} kind=${state.replyTarget?.systemKind || ""} reason=${resolved.reason || "invalid"}`
+          );
+        }).catch((error) => {
+          console.error(`[cyberboss] failed to deliver fallback system reply thread=${state.threadId}: ${error.message}`);
+        });
+
+        await state.sendChain;
+        return;
+      }
       console.error(
         `[cyberboss] invalid system reply thread=${state.threadId} reason=${resolved.reason} preview=${JSON.stringify(replyText.slice(0, 160))}`
       );
@@ -572,6 +599,8 @@ class StreamDelivery {
       userId: target.userId,
       contextToken: target.contextToken,
       provider: target.provider,
+      systemKind: normalizeSystemReplyKind(target.systemKind),
+      systemSource: normalizeSystemReplySourceName(target.systemSource),
     };
     state.threadReplyTargetAttached = true;
   }
@@ -734,6 +763,8 @@ function normalizeReplyTarget(target) {
     userId: String(target.userId).trim(),
     contextToken: String(target.contextToken).trim(),
     provider: normalizeText(target.provider),
+    systemKind: normalizeSystemReplyKind(target.systemKind),
+    systemSource: normalizeSystemReplySourceName(target.systemSource),
   };
 }
 
@@ -765,10 +796,10 @@ function resolveSystemReplyDelivery(replyText, policy = createSystemReplyPolicy(
   const source = normalizeSystemReplySource(normalized);
   const actionCandidate = extractSystemActionJsonCandidate(source.text);
   if (actionCandidate) {
-    return resolveSystemReplyAction(actionCandidate);
+    return resolveSystemReplyAction(actionCandidate, policy);
   }
   if (source.requiresStructuredAction || source.text.startsWith("{")) {
-    return resolveSystemReplyAction(source.text);
+    return resolveSystemReplyAction(source.text, policy);
   }
 
   if (!policy.allowPlainTextSendMessage) {
@@ -778,7 +809,7 @@ function resolveSystemReplyDelivery(replyText, policy = createSystemReplyPolicy(
   return resolvePlainTextSystemReply(source.text, policy);
 }
 
-function resolveSystemReplyAction(candidate) {
+function resolveSystemReplyAction(candidate, policy = createSystemReplyPolicy("")) {
   const parsed = tryParseJson(candidate);
   if (!parsed || Array.isArray(parsed) || typeof parsed !== "object") {
     return { kind: "invalid", reason: "final reply is not a JSON object" };
@@ -786,6 +817,9 @@ function resolveSystemReplyAction(candidate) {
 
   const action = normalizeSystemActionName(parsed.action || parsed.cyberboss_action);
   if (action === "silent") {
+    if (!policy.allowSilent) {
+      return { kind: "invalid", reason: `${policy.requiredSendReason || "this system trigger"} must send a user-facing message` };
+    }
     return { kind: "silent" };
   }
   if (action !== "send_message") {
@@ -854,7 +888,20 @@ function containsPlainTextSystemHazard(text) {
 }
 
 function createSystemReplyPolicy(runtimeId) {
+  return createSystemReplyPolicyForTarget(runtimeId, {});
+}
+
+function createSystemReplyPolicyForKind(runtimeId, systemKind = "") {
+  return createSystemReplyPolicyForTarget(runtimeId, { systemKind });
+}
+
+function createSystemReplyPolicyForTarget(runtimeId, { systemKind = "", systemSource = "" } = {}) {
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+  const normalizedSystemKind = normalizeSystemReplyKind(systemKind);
+  const normalizedSystemSource = normalizeSystemReplySourceName(systemSource);
+  const isMandatoryReachout = normalizedSystemKind === "reminder"
+    || normalizedSystemKind === "checkin"
+    || normalizedSystemSource === "random_pulse";
   /*
    * System/check-in turns are intentionally stricter than normal WeChat replies.
    * The stable protocol is one JSON action object: {"action":"silent"} or
@@ -874,10 +921,41 @@ function createSystemReplyPolicy(runtimeId) {
   return {
     runtimeId: normalizedRuntimeId,
     allowPlainTextSendMessage: normalizedRuntimeId === "claudecode",
+    allowSilent: !isMandatoryReachout,
+    requiredSendReason: isMandatoryReachout ? (normalizedSystemSource || normalizedSystemKind) : "",
     maxPlainTextLength: 280,
     maxPlainTextLines: 3,
   };
 }
+
+function normalizeSystemReplyKind(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (["pulse", "reminder", "checkin", "location"].includes(normalized)) {
+    return normalized;
+  }
+  return "";
+}
+
+function normalizeSystemReplySourceName(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  return normalized || "";
+}
+
+function buildMandatorySystemFallbackMessage(systemKind, systemSource = "") {
+  const normalizedKind = normalizeSystemReplyKind(systemKind);
+  const normalizedSource = normalizeSystemReplySourceName(systemSource);
+  if (normalizedKind === "reminder") {
+    return "来提醒你一下，刚才那件事现在怎么样了？如果已经弄完了也可以直接跟我说。";
+  }
+  if (normalizedKind === "checkin") {
+    return "刚想起你，过来看看你这会儿在忙什么，状态还好吗？";
+  }
+  if (normalizedSource === "random_pulse") {
+    return "刚想到你最近生活里那几条线，就过来碰碰你，最近还在那件事上吗？";
+  }
+  return "";
+}
+
 
 function classifyReplyItemSourceText(replyText) {
   const normalized = normalizeLineEndings(String(replyText || "")).trim();

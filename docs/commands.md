@@ -37,6 +37,8 @@ The runtime can be `codex` or `claudecode`, but the documented command surface s
 - `thread.stop`
 - `system.checkin_range`
   Host-side name for the check-in wake-up interval control.
+- `system.pulse_range`
+  Host-side name for the scheduled life-pulse interval control.
 - `channel.chunk_min`
 
 ### Approvals & Control
@@ -104,6 +106,8 @@ Notes:
 - `/switch <threadId>`
 - `/checkin <min>-<max>`
   Adjust the host-side random check-in wake-up range for the current project.
+- `/pulse <min>-<max>`
+  Adjust the host-side scheduled life-pulse range for the current project.
 - `/chunk <number>`
 - `/yes`
 - `/always`
@@ -121,3 +125,5 @@ Notes:
 - file sending is still available, but no longer exposed as a WeChat command
 - `checkin` remains the human-facing command/config term for the host scheduler
 - `pulse` remains the model-facing soft-trigger semantic term for non-reminder internal turns
+- when unset, `/checkin` falls back to `CYBERBOSS_CHECKIN_MIN_INTERVAL_MS` / `CYBERBOSS_CHECKIN_MAX_INTERVAL_MS`, then to `5-15` minutes
+- when unset, `/pulse` falls back to `CYBERBOSS_PULSE_MIN_INTERVAL_MS` / `CYBERBOSS_PULSE_MAX_INTERVAL_MS`, then to `180-360` minutes
