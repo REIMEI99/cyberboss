@@ -317,6 +317,7 @@ function buildActivityReviewTrigger(config, { activities = [], habitSummary = nu
     `A scheduled activity review fired for ${userName}. You must send one short natural message to the user now.`,
     "This is a hard activity-review turn, not a private planning pass. Do not return silent.",
     "Do not mark activity items done, dropped, or abandoned unless the user explicitly said so in actual chat context.",
+    "The message should not be flat. It should feel a little like you genuinely wanted to catch the user's attention and would like them to reply.",
   ];
   if (normalizedActivities.length) {
     lines.push("", "Due activities:");

@@ -136,4 +136,5 @@ Notes:
 - when unset, `/checkin` falls back to `CYBERBOSS_CHECKIN_MIN_INTERVAL_MS` / `CYBERBOSS_CHECKIN_MAX_INTERVAL_MS`, then to `5-15` minutes
 - when unset, `/pulse` falls back to `CYBERBOSS_PULSE_MIN_INTERVAL_MS` / `CYBERBOSS_PULSE_MAX_INTERVAL_MS`, then to `180-360` minutes
 - `/activity` is read-only in phase 1 and shows activity threads rather than creating reminders
+- activities auto-arm a first review by default; if the model does not specify one, the default cadence is `30-60` minutes
 - `/reminder` is read-only in phase 1 and shows active hard reminders only

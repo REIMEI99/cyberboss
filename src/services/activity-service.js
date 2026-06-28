@@ -5,8 +5,8 @@ const crypto = require("crypto");
 const MAX_OPEN = 40;
 const MAX_DONE = 20;
 const DEFAULT_CHECKBACK_MINUTES = 10;
-const DEFAULT_REVIEW_MIN_MINUTES = 120;
-const DEFAULT_REVIEW_MAX_MINUTES = 360;
+const DEFAULT_REVIEW_MIN_MINUTES = 30;
+const DEFAULT_REVIEW_MAX_MINUTES = 60;
 const ACTIVE_STATUSES = new Set(["open", "paused"]);
 const CLOSED_STATUSES = new Set(["done", "archived"]);
 const ITEM_STATUSES = new Set(["open", "done", "dropped"]);
@@ -75,6 +75,9 @@ class ActivityService {
       const raw = fs.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
       this.state = normalizeActivityState(parsed);
+      if (backfillMissingOpenActivityReviews(this.state)) {
+        this.save();
+      }
     } catch {
       this.state = { activities: [] };
     }
@@ -98,17 +101,26 @@ class ActivityService {
       throw new Error("Activity add requires a non-empty title.");
     }
     const now = new Date().toISOString();
+    const normalizedReviewMinMinutes = normalizePositiveInteger(reviewMinMinutes, DEFAULT_REVIEW_MIN_MINUTES);
+    const normalizedReviewMaxMinutes = Math.max(
+      normalizedReviewMinMinutes,
+      normalizePositiveInteger(reviewMaxMinutes, DEFAULT_REVIEW_MAX_MINUTES)
+    );
     const activity = normalizeActivity({
       id: crypto.randomUUID(),
       title: normalizedTitle,
       status: "open",
       items: normalizeItems(items, { referenceTime: now }),
       reminderId: normalizeText(reminderId),
-      nextReviewAt: normalizeIsoTime(nextReviewAt),
+      nextReviewAt: normalizeIsoTime(nextReviewAt) || buildInitialNextReviewAt({
+        baseTime: now,
+        reviewMinMinutes: normalizedReviewMinMinutes,
+        reviewMaxMinutes: normalizedReviewMaxMinutes,
+      }),
       lastReviewedAt: "",
       lastProgressAt: "",
-      reviewMinMinutes,
-      reviewMaxMinutes,
+      reviewMinMinutes: normalizedReviewMinMinutes,
+      reviewMaxMinutes: normalizedReviewMaxMinutes,
       createdAt: now,
       updatedAt: now,
     });
@@ -442,6 +454,41 @@ function normalizeActivity(value) {
   return activity;
 }
 
+function backfillMissingOpenActivityReviews(state) {
+  let changed = false;
+  const activities = Array.isArray(state?.activities) ? state.activities : [];
+  for (const activity of activities) {
+    if (activity?.status !== "open" || normalizeIsoTime(activity?.nextReviewAt)) {
+      continue;
+    }
+    const baseTime = normalizeIsoTime(activity?.lastProgressAt)
+      || normalizeIsoTime(activity?.updatedAt)
+      || normalizeIsoTime(activity?.createdAt)
+      || new Date().toISOString();
+    activity.nextReviewAt = buildInitialNextReviewAt({
+      baseTime,
+      reviewMinMinutes: activity?.reviewMinMinutes,
+      reviewMaxMinutes: activity?.reviewMaxMinutes,
+    });
+    if (activity.nextReviewAt) {
+      changed = true;
+    }
+  }
+  return changed;
+}
+
+function buildInitialNextReviewAt({ baseTime = "", reviewMinMinutes, reviewMaxMinutes } = {}) {
+  const baseIso = normalizeIsoTime(baseTime) || new Date().toISOString();
+  const baseMs = Date.parse(baseIso);
+  if (!Number.isFinite(baseMs) || baseMs <= 0) {
+    return "";
+  }
+  const minMinutes = normalizePositiveInteger(reviewMinMinutes, DEFAULT_REVIEW_MIN_MINUTES);
+  const maxMinutes = Math.max(minMinutes, normalizePositiveInteger(reviewMaxMinutes, DEFAULT_REVIEW_MAX_MINUTES));
+  const delayMinutes = pickRandomInteger(minMinutes, maxMinutes);
+  return new Date(baseMs + delayMinutes * 60_000).toISOString();
+}
+
 function normalizeItems(value, { referenceTime = "" } = {}) {
   if (!Array.isArray(value)) return [];
   const fallbackTime = normalizeIsoTime(referenceTime) || new Date().toISOString();
@@ -503,6 +550,15 @@ function normalizeItemStatus(value) {
 function normalizePositiveInteger(value, fallback) {
   const parsed = Number.parseInt(String(value || ""), 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function pickRandomInteger(min, max) {
+  const normalizedMin = normalizePositiveInteger(min, DEFAULT_REVIEW_MIN_MINUTES);
+  const normalizedMax = Math.max(normalizedMin, normalizePositiveInteger(max, DEFAULT_REVIEW_MAX_MINUTES));
+  if (normalizedMin === normalizedMax) {
+    return normalizedMin;
+  }
+  return normalizedMin + Math.floor(Math.random() * (normalizedMax - normalizedMin + 1));
 }
 
 function normalizeLimit(value) {

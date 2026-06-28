@@ -1,4 +1,4 @@
-﻿const os = require("os");
+const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
@@ -1423,7 +1423,7 @@ class CyberbossApp {
     if (!activityService) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "鈿狅笍 Activity service is unavailable.",
+        text: "Activity service is unavailable.",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1468,7 +1468,7 @@ class CyberbossApp {
     if (!activity) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "馃挕 Activity not found.\nUsage: /activity | /activity items | /activity all | /activity <id>",
+        text: "Activity not found.\nUsage: /activity | /activity items | /activity all | /activity <id>",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1486,7 +1486,7 @@ class CyberbossApp {
     if (!reminderService) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "鈿狅笍 Reminder service is unavailable.",
+        text: "Reminder service is unavailable.",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1506,7 +1506,7 @@ class CyberbossApp {
     if (!reminder) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "馃挕 Reminder not found.\nUsage: /reminder | /reminder all | /reminder <id>",
+        text: "Reminder not found.\nUsage: /reminder | /reminder all | /reminder <id>",
         contextToken: normalized.contextToken,
       });
       return;
@@ -2471,9 +2471,13 @@ function renderActivityDetailText(activity, activityService) {
   const lines = [
     `Activity: ${activity.title}`,
     `Status: ${activity.status || "open"}`,
+    `Review cadence: ${Number(activity.reviewMinMinutes || 0)}-${Number(activity.reviewMaxMinutes || 0)} min`,
   ];
   if (activity.nextReviewAt) {
     lines.push(`Next review: ${formatWechatLocalTime(activity.nextReviewAt)}`);
+  }
+  if (activity.lastReviewedAt) {
+    lines.push(`Last reviewed: ${formatWechatLocalTime(activity.lastReviewedAt)}`);
   }
   if (activity.lastProgressAt) {
     lines.push(`Last progress: ${formatWechatLocalTime(activity.lastProgressAt)}`);

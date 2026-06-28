@@ -25,17 +25,23 @@ function createReminderStore(stateDir) {
 
 test("activity add stores normalized item objects and empty reminderId", () => {
   const { service } = createActivityService();
+  const beforeMs = Date.now();
   const activity = service.add({
     title: "errands",
     items: ["buy fruit", "pick up package"],
     reminderId: "",
   });
+  const afterMs = Date.now();
   assert.equal(activity.title, "errands");
   assert.equal(activity.status, "open");
   assert.equal(activity.reminderId, "");
   assert.equal(activity.items.length, 2);
   assert.equal(activity.items[0].text, "buy fruit");
   assert.equal(activity.items[0].status, "open");
+  const nextReviewAtMs = Date.parse(activity.nextReviewAt || "");
+  assert.ok(Number.isFinite(nextReviewAtMs));
+  assert.ok(nextReviewAtMs >= beforeMs + 30 * 60_000);
+  assert.ok(nextReviewAtMs <= afterMs + 60 * 60_000);
 });
 
 test("activity add without items defaults to empty array", () => {
@@ -140,6 +146,25 @@ test("old activity data without items migrates to empty items array", () => {
   const list = service.list({ limit: 10 });
   assert.equal(list.count, 1);
   assert.deepEqual(list.activities[0].items, []);
+});
+
+test("old open activity without nextReviewAt is backfilled with a review time", () => {
+  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-activity-review-backfill-test-"));
+  const activityFile = path.join(stateDir, "activities.json");
+  fs.writeFileSync(activityFile, JSON.stringify({
+    activities: [{
+      id: "old-open-1",
+      title: "old open task",
+      status: "open",
+      items: [],
+      createdAt: "2026-06-22T00:00:00.000Z",
+      updatedAt: "2026-06-22T01:00:00.000Z",
+    }],
+  }));
+  const service = new ActivityService({ config: { activityFile } });
+  const activity = service.getById("old-open-1");
+  assert.ok(activity);
+  assert.ok(activity.nextReviewAt);
 });
 
 test("listDueReviews returns only open due activities", () => {

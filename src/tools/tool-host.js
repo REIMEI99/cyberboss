@@ -312,8 +312,8 @@ const PROJECT_TOOLS = [
       properties: {
         title: { type: "string", description: "Short title for the activity or work sequence." },
         items: { type: "array", items: { type: "string" }, description: "Optional list of specific items in this work sequence. Omit if the title alone is sufficient." },
-        reviewMinMinutes: { type: "integer", description: "Optional minimum minutes before the activity should be reviewed again. Defaults to 120." },
-        reviewMaxMinutes: { type: "integer", description: "Optional maximum minutes before the activity should be reviewed again. Defaults to 360." },
+        reviewMinMinutes: { type: "integer", description: "Optional minimum minutes before the activity should be reviewed again. Defaults to 30." },
+        reviewMaxMinutes: { type: "integer", description: "Optional maximum minutes before the activity should be reviewed again. Defaults to 60." },
         nextReviewAt: { type: "string", description: "Optional absolute ISO time for the first activity review if the caller wants to pin it explicitly." },
       },
       additionalProperties: false,

@@ -79,7 +79,7 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse", sy
     isHardReminder
       ? "Do not sound like a robotic alarm. You must reach out, but you may phrase it as a natural chat message that lightly carries the reminder and opens a real conversation."
       : isActivityReview
-        ? "This must still feel like a natural chat message, not a robotic workflow ping. Review the listed activities and send one grounded message."
+        ? "This must still feel like a natural chat message, not a robotic workflow ping. Review the listed activities and send one grounded message that slightly tries to pull the user back into the thread and makes replying feel easy."
       : isReminder
       ? "Do not sound like a robotic alarm. You must reach out, but you may phrase it as a natural chat message that lightly carries the reminder, references current context, or opens a small real conversation."
       : isCheckin
@@ -102,11 +102,11 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse", sy
           ? "This pulse was scheduled precisely to create a gentle proactive outreach. Send a natural message now rather than turning it into private review."
           : "If you have not contacted the user for a while, treat this as a real opportunity to reach out. Only return silent if the user explicitly said not to message, or quiet hours are active.",
     isActivityReview
-      ? "A good activity-review message briefly checks whether the user is still on the task, what changed, or whether one next step is blocked."
+      ? "A good activity-review message should feel a little bit like you genuinely want the user to answer you: lightly curious, slightly pulling for attention, and easy to reply to with even one short phrase."
       : isHardReminder
-        ? "A good hard-reminder message can briefly mention the due thing and also sound alive: for example by checking how the user is doing, picking up the current thread, or asking one concrete next-step question."
+        ? "A good hard-reminder message can be a little more attention-seeking than a neutral reminder: it may sound like you came over specifically to catch the user, want a reply, or want to know whether they are stuck, as long as it still feels natural."
       : isReminder
-      ? "A good reminder message can briefly mention the due thing and also sound alive: for example by checking how the user is doing, picking up the current thread, or asking one concrete next-step question."
+        ? "A good reminder message can briefly mention the due thing and also sound alive: for example by checking how the user is doing, picking up the current thread, or asking one concrete next-step question."
       : isCheckin
         ? "A good check-in can be indirect and human, but it still has to be an actual outbound message in this turn."
         : isScheduledPulse

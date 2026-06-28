@@ -947,10 +947,10 @@ function buildMandatorySystemFallbackMessage(systemKind, systemSource = "") {
   const normalizedKind = normalizeSystemReplyKind(systemKind);
   const normalizedSource = normalizeSystemReplySourceName(systemSource);
   if (normalizedSource === "activity_review") {
-    return "刚想到你手头那件事，过来确认一下，你现在还在推进吗？";
+    return "我又想起你手头那件事了，忍不住来抓你一下，你现在还在推进吗？回我几个字也行。";
   }
   if (normalizedSource === "hard_reminder") {
-    return "来提醒你一下，刚才那件事现在怎么样了？如果已经弄完了也可以直接跟我说。";
+    return "我专门来抓你一下，刚才那件事现在怎么样了？哪怕回我一句也行，我想知道你是不是卡住了。";
   }
   if (normalizedKind === "reminder") {
     return "来提醒你一下，刚才那件事现在怎么样了？如果已经弄完了也可以直接跟我说。";
