@@ -60,12 +60,15 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse", sy
   const isHardReminder = normalizedSource === "hard_reminder";
   const isActivityReview = normalizedSource === "activity_review";
   const isScheduledPulse = normalizedSource === "random_pulse";
+  const isPostTurnAudit = normalizedSource === "post_turn_audit";
   const sections = [
     ...(localTime ? [`[${localTime}]`, ""] : []),
     "SYSTEM ACTION MODE: internal trigger, not user chat.",
     `Turn intent: ${resolveSystemTurnIntent(effectiveKind)}.`,
     `System kind: ${effectiveKind}.`,
-    isHardReminder
+    isPostTurnAudit
+      ? "This is a post-turn audit. Your default action is private maintenance: fix missing activity or habit state writes, then return silent."
+      : isHardReminder
       ? "This is a hard reminder. Your default action is to send a message to the user now. Do not return silent unless the user already confirmed completion in the current turn."
       : isActivityReview
         ? "This is a scheduled activity review. Your default action is to send a message to the user now."
@@ -80,6 +83,8 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse", sy
       ? "Do not sound like a robotic alarm. You must reach out, but you may phrase it as a natural chat message that lightly carries the reminder and opens a real conversation."
       : isActivityReview
         ? "This must still feel like a natural chat message, not a robotic workflow ping. Review the listed activities and send one grounded message that slightly tries to pull the user back into the thread and makes replying feel easy."
+      : isPostTurnAudit
+        ? "Treat this as an internal repair pass, not a second outward reply. Do the bookkeeping work first; only message the user if a truly necessary correction cannot be handled privately."
       : isReminder
       ? "Do not sound like a robotic alarm. You must reach out, but you may phrase it as a natural chat message that lightly carries the reminder, references current context, or opens a small real conversation."
       : isCheckin
@@ -87,11 +92,15 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse", sy
         : isScheduledPulse
           ? "This should feel like a natural life-thread message, not a robotic notification. You are expected to actually reach out in this turn."
           : "If you choose to message, prefer a natural chat tone over robotic notification wording.",
-    "Default first step: use cyberboss_pulse_review unless the trigger already gives you enough context.",
+    isPostTurnAudit
+      ? "Default first step: use the trigger details plus current tools/state to repair any missed follow-up capture. You usually do not need cyberboss_pulse_review for this."
+      : "Default first step: use cyberboss_pulse_review unless the trigger already gives you enough context.",
     "Activity is the soul of this assistant. Read the situation in this order: current open activities (what is the user doing or about to do?), today's habit state, any Obsidian signal, memory items, whether user contact is useful now, and whether a follow-up is needed.",
     "For near-term user actions, capture them as open activities with cyberboss_activity_add and set the review cadence on the activity itself. Use a standalone reminder only when there is a real hard due time.",
     isActivityReview
       ? "In an activity-review turn, do not silently mark items done, dropped, or abandoned unless the user explicitly said so. Treat the listed due activities as live context for one outbound message."
+      : isPostTurnAudit
+        ? "Assume the immediately previous assistant reply already happened in this same thread. Do not contradict it, do not restate it, and do not append an extra chat message unless private repair is genuinely impossible."
       : isHardReminder
         ? "Hard reminders stay active until explicitly cleared. Do not assume the user already did it just because the reminder fired. If recent context clearly shows completion, list active reminders and clear the matching one. Otherwise, send a message to the user now."
       : isReminder
@@ -101,7 +110,9 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse", sy
         : isScheduledPulse
           ? "This pulse was scheduled precisely to create a gentle proactive outreach. Send a natural message now rather than turning it into private review."
           : "If you have not contacted the user for a while, treat this as a real opportunity to reach out. Only return silent if the user explicitly said not to message, or quiet hours are active.",
-    isActivityReview
+    isPostTurnAudit
+      ? "A good post-turn audit is invisible to the user: it quietly captures the missed activity/habit state and then ends with silent."
+      : isActivityReview
       ? "A good activity-review message should feel a little bit like you genuinely want the user to answer you: lightly curious, slightly pulling for attention, and easy to reply to with even one short phrase."
       : isHardReminder
         ? "A good hard-reminder message can be a little more attention-seeking than a neutral reminder: it may sound like you came over specifically to catch the user, want a reply, or want to know whether they are stuck, as long as it still feels natural."
@@ -113,7 +124,9 @@ function buildSystemInboundText({ text, createdAt = "", systemKind = "pulse", sy
           ? "A good scheduled pulse should sound like you genuinely remembered a part of the user's life and brought it up naturally."
           : "A good pulse message should feel grounded in the user's real life, not like a generic notification.",
     "Habit closure matters. If a habit is still incomplete today, either nudge now or set a reminder to check later. If the user already confirmed completion or clean abandonment, prefer writing the habit state.",
-    isActivityReview
+    isPostTurnAudit
+      ? "For this post-turn audit, private maintenance plus silent is the normal complete action. Do not turn it into a follow-up chat unless the trigger explicitly makes user contact unavoidable."
+      : isActivityReview
       ? "For this scheduled activity review, sending the user a message is itself a complete action. Do not turn it into private maintenance work before finishing the turn."
       : isHardReminder
         ? "For a hard reminder, sending the user a message is itself a complete action. Do not require extra private maintenance work before finishing the turn."

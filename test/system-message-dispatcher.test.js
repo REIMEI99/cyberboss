@@ -108,3 +108,22 @@ test("hard reminder system messages keep mandatory reminder wording", () => {
   assert.match(prepared.text, /This is a hard reminder\./);
   assert.match(prepared.text, /Do not return silent/i);
 });
+
+test("post-turn audit system messages are prepared as silent internal repair passes", () => {
+  const dispatcher = createDispatcher();
+  const prepared = dispatcher.buildPreparedMessage({
+    id: "sys-6",
+    senderId: "user-1",
+    kind: "pulse",
+    source: "post_turn_audit",
+    text: "No new activity or reminder was created during that turn.",
+    createdAt: "2026-06-27T10:00:00.000Z",
+  });
+
+  assert.equal(prepared.turnIntent, "pulse");
+  assert.equal(prepared.systemSource, "post_turn_audit");
+  assert.match(prepared.text, /post-turn audit/i);
+  assert.match(prepared.text, /private maintenance/i);
+  assert.match(prepared.text, /return silent/i);
+  assert.match(prepared.text, /do not contradict it, do not restate it/i);
+});
