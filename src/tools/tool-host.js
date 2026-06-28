@@ -303,50 +303,32 @@ const PROJECT_TOOLS = [
   },
   {
     name: "cyberboss_activity_add",
-    description: "Add an open activity for something the user said they will do or are doing. One activity can hold multiple items (a work sequence). A short-cycle check-back reminder is automatically created and 1:1 bound to this activity. Use checkBackMinutes to set when the first check fires and followupDelayMinutes to set the repeat interval. For current or same-day ongoing actions, default to a conservative short value, usually 10-60 minutes. Do not use half-day values like 480 unless the user explicitly said the action belongs much later. For long-term wishes with no timeline, use memory type=wishseed instead. If the user is now taking action on a previously standalone reminder, pass replacesReminderId to close that old reminder after the new activity-reminder pair is created.",
-    shortHint: "Add an open activity with auto check-back reminder.",
-    topics: ["activity", "reminder"],
+    description: "Add an open activity for something the user said they will do or are doing. One activity can hold multiple items (a work sequence). This does NOT auto-create a reminder. Use reviewMinMinutes and reviewMaxMinutes to set the activity-review cadence for same-day or ongoing work threads. Use a separate reminder only when the user gave a real due time. For long-term wishes with no timeline, use memory type=wishseed instead.",
+    shortHint: "Add an open activity.",
+    topics: ["activity"],
     inputSchema: {
       type: "object",
-      required: ["title", "checkBackMinutes"],
+      required: ["title"],
       properties: {
         title: { type: "string", description: "Short title for the activity or work sequence." },
         items: { type: "array", items: { type: "string" }, description: "Optional list of specific items in this work sequence. Omit if the title alone is sufficient." },
-        checkBackMinutes: { type: "integer", description: "REQUIRED. Minutes before the first check-back fires. Set what the user actually implied; do not silently round same-day work up to half a day. For imminent actions use 5-30. For something the user is continuing today, usually use 10-60. Only go above 120 when the user explicitly placed it later in the day or several hours away. Values like 480 are usually wrong for an ongoing activity." },
-        followupDelayMinutes: { type: "integer", description: "Minutes between repeated check-backs after the first fire. Usually the same as checkBackMinutes or slightly higher. For same-day ongoing activities, keep it short enough to maintain contact; do not turn an activity into an all-day reminder loop unless the user explicitly wants that cadence." },
-        replacesReminderId: { type: "string", description: "Optional standalone reminder id to close after creating this new activity-reminder pair." },
+        reviewMinMinutes: { type: "integer", description: "Optional minimum minutes before the activity should be reviewed again. Defaults to 120." },
+        reviewMaxMinutes: { type: "integer", description: "Optional maximum minutes before the activity should be reviewed again. Defaults to 360." },
+        nextReviewAt: { type: "string", description: "Optional absolute ISO time for the first activity review if the caller wants to pin it explicitly." },
       },
       additionalProperties: false,
     },
-    async handler({ services, args, context }) {
-      const activity = services.activity.add({ title: args.title, items: args.items, reminderId: "" });
-      let reminderId = "";
-      try {
-        const checkBackMinutes = Number.isInteger(args.checkBackMinutes) && args.checkBackMinutes > 0 ? args.checkBackMinutes : 10;
-        const reminder = await services.reminder.create({
-          text: `Check-back: ${activity.title}. Send a message to the user asking whether they have started or finished this. Do not assume completion without their confirmation. If they confirm completion, use cyberboss_activity_complete and cyberboss_reminder_complete. If they say they will not do it, use cyberboss_activity_drop and cyberboss_reminder_complete. Do not stay silent - this reminder exists to reach out to the user.`,
-          delayMinutes: checkBackMinutes,
-          followupDelayMinutes: Number.isInteger(args.followupDelayMinutes) && args.followupDelayMinutes > 0 ? args.followupDelayMinutes : undefined,
-          activityId: activity.id,
-        }, context);
-        reminderId = reminder.id;
-        if (reminderId) {
-          services.activity.bindReminder({ id: activity.id, reminderId });
-        }
-        const replacesReminderId = normalizeText(args.replacesReminderId);
-        if (replacesReminderId && replacesReminderId !== reminderId) {
-          try {
-            services.reminder.complete({ id: replacesReminderId });
-          } catch (error) {
-            console.warn(`[cyberboss] activity reminder replacement failed: ${error?.message || error}`);
-          }
-        }
-      } catch (error) {
-        console.warn(`[cyberboss] activity reminder creation failed: ${error?.message || error}`);
-      }
+    async handler({ services, args }) {
+      const activity = services.activity.add({
+        title: args.title,
+        items: args.items,
+        reviewMinMinutes: Number.isInteger(args.reviewMinMinutes) ? args.reviewMinMinutes : undefined,
+        reviewMaxMinutes: Number.isInteger(args.reviewMaxMinutes) ? args.reviewMaxMinutes : undefined,
+        nextReviewAt: normalizeText(args.nextReviewAt),
+      });
       return {
         text: `Activity added: ${activity.title}`,
-        data: { id: activity.id, title: activity.title, items: activity.items || [], reminderId, hasReminder: Boolean(reminderId), createdAt: activity.createdAt },
+        data: serializeActivity(activity),
       };
     },
   },
@@ -368,7 +350,51 @@ const PROJECT_TOOLS = [
       const result = services.activity.addItem({ id: args.id, text: args.text });
       return {
         text: `Item added to activity: ${result.title}`,
-        data: { id: result.id, title: result.title, items: result.items || [], itemCount: (result.items || []).length },
+        data: serializeActivity(result),
+      };
+    },
+  },
+  {
+    name: "cyberboss_activity_item_mark_done",
+    description: "Mark an activity item as done. Use only when the user explicitly confirmed that this specific item is completed.",
+    shortHint: "Mark an activity item done.",
+    topics: ["activity"],
+    inputSchema: {
+      type: "object",
+      required: ["id", "itemId"],
+      properties: {
+        id: { type: "string", description: "Activity id." },
+        itemId: { type: "string", description: "Activity item id." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.activity.markItemDone({ id: args.id, itemId: args.itemId });
+      return {
+        text: `Activity item completed: ${result.title}`,
+        data: serializeActivity(result),
+      };
+    },
+  },
+  {
+    name: "cyberboss_activity_item_mark_dropped",
+    description: "Mark an activity item as dropped. Use only when the user explicitly said they are not doing this item.",
+    shortHint: "Mark an activity item dropped.",
+    topics: ["activity"],
+    inputSchema: {
+      type: "object",
+      required: ["id", "itemId"],
+      properties: {
+        id: { type: "string", description: "Activity id." },
+        itemId: { type: "string", description: "Activity item id." },
+      },
+      additionalProperties: false,
+    },
+    async handler({ services, args }) {
+      const result = services.activity.markItemDropped({ id: args.id, itemId: args.itemId });
+      return {
+        text: `Activity item dropped: ${result.title}`,
+        data: serializeActivity(result),
       };
     },
   },
@@ -390,14 +416,14 @@ const PROJECT_TOOLS = [
         text: `Activities loaded: ${result.count}.`,
         data: {
           count: result.count,
-          activities: result.activities.map((a) => ({ id: a.id, title: a.title, items: a.items || [], hasReminder: Boolean(a.reminderId), createdAt: a.createdAt })),
+          activities: result.activities.map((activity) => serializeActivity(activity)),
         },
       };
     },
   },
   {
     name: "cyberboss_activity_complete",
-    description: "Mark an open activity as done. Use this when the user confirms the action is completed. The bound check-back reminder is cleared automatically.",
+    description: "Mark an activity thread as done. Use this when the whole thread is complete, not just one item.",
     shortHint: "Mark an activity as done.",
     topics: ["activity"],
     inputSchema: {
@@ -415,13 +441,13 @@ const PROJECT_TOOLS = [
       }
       return {
         text: `Activity completed: ${result.title}`,
-        data: { id: result.id, title: result.title, items: result.items || [] },
+        data: serializeActivity(result),
       };
     },
   },
   {
     name: "cyberboss_activity_drop",
-    description: "Drop an open activity - the user won't do it, or it's no longer relevant. The activity is removed immediately. The bound check-back reminder is cleared automatically.",
+    description: "Archive an activity thread when the user will not do it or it is no longer relevant.",
     shortHint: "Drop an open activity.",
     topics: ["activity"],
     inputSchema: {
@@ -439,7 +465,7 @@ const PROJECT_TOOLS = [
       }
       return {
         text: `Activity dropped: ${result.title}`,
-        data: { id: result.id, title: result.title, items: result.items || [] },
+        data: serializeActivity(result),
       };
     },
   },
@@ -479,7 +505,14 @@ const PROJECT_TOOLS = [
           data: { id: dropped.id, title: dropped.title, memory: unwrapStoredMemoryResult(memory) },
         };
       } catch (error) {
-        services.activity.add({ title: dropped.title, items: dropped.items, reminderId: dropped.reminderId });
+        services.activity.add({
+          title: dropped.title,
+          items: extractActivityItemTexts(dropped),
+          reminderId: dropped.reminderId,
+          reviewMinMinutes: dropped.reviewMinMinutes,
+          reviewMaxMinutes: dropped.reviewMaxMinutes,
+          nextReviewAt: dropped.nextReviewAt,
+        });
         throw error;
       }
     },
@@ -1363,6 +1396,40 @@ function unwrapStoredMemoryResult(result) {
     return result.memory;
   }
   return result;
+}
+
+function extractActivityItemTexts(activity) {
+  const items = Array.isArray(activity?.items) ? activity.items : [];
+  return items
+    .map((item) => (typeof item === "string" ? item : normalizeText(item?.text)))
+    .filter(Boolean);
+}
+
+function serializeActivity(activity) {
+  const items = Array.isArray(activity?.items) ? activity.items : [];
+  const openItems = items.filter((item) => normalizeText(item?.status || "open") === "open");
+  const doneItems = items.filter((item) => normalizeText(item?.status) === "done");
+  const droppedItems = items.filter((item) => normalizeText(item?.status) === "dropped");
+  return {
+    id: activity?.id || "",
+    title: activity?.title || "",
+    status: activity?.status || "open",
+    items,
+    openItems,
+    doneItems,
+    droppedItems,
+    itemCount: items.length,
+    openItemCount: openItems.length,
+    doneItemCount: doneItems.length,
+    droppedItemCount: droppedItems.length,
+    nextReviewAt: activity?.nextReviewAt || "",
+    lastReviewedAt: activity?.lastReviewedAt || "",
+    lastProgressAt: activity?.lastProgressAt || "",
+    reminderId: activity?.reminderId || "",
+    hasReminder: Boolean(activity?.reminderId),
+    createdAt: activity?.createdAt || "",
+    updatedAt: activity?.updatedAt || "",
+  };
 }
 
 function normalizeText(value) {

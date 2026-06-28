@@ -142,6 +142,20 @@ const COMMAND_GROUPS = [
         weixin: ["/chunk <number>"],
         status: "active",
       },
+      {
+        action: "activity.inspect",
+        summary: "Show current activities for the bound workspace/chat",
+        terminal: [],
+        weixin: ["/activity", "/activity items", "/activity all", "/activity <id>"],
+        status: "active",
+      },
+      {
+        action: "reminder.inspect",
+        summary: "Show current hard reminders for the bound workspace/chat",
+        terminal: [],
+        weixin: ["/reminder", "/reminder all", "/reminder <id>"],
+        status: "active",
+      },
     ],
   },
   {

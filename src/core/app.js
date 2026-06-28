@@ -1,4 +1,4 @@
-const os = require("os");
+﻿const os = require("os");
 const path = require("path");
 const crypto = require("crypto");
 const fs = require("fs");
@@ -517,7 +517,7 @@ class CyberbossApp {
       const messageText = error instanceof Error ? error.message : String(error || "unknown error");
       await this.channelAdapter.sendText({
         userId: prepared.senderId,
-        text: `❌ Request failed\n${messageText}`,
+        text: `鉂?Request failed\n${messageText}`,
         contextToken: prepared.contextToken,
       }).catch(() => {});
       return false;
@@ -844,7 +844,7 @@ class CyberbossApp {
     if (!persisted.saved.length && persisted.failed.length && !String(normalized.text || "").trim()) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `⚠️ Failed to receive image or attachment\n${persisted.failed.map((item) => item.reason).join("\n")}`,
+        text: `鈿狅笍 Failed to receive image or attachment\n${persisted.failed.map((item) => item.reason).join("\n")}`,
         contextToken: normalized.contextToken,
         preserveBlock: true,
       }).catch(() => {});
@@ -858,7 +858,7 @@ class CyberbossApp {
     if (!prepared.originalText && !prepared.attachments.length && prepared.attachmentFailures.length) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `⚠️ Failed to receive image or attachment\n${persisted.failed.map((item) => item.reason).join("\n")}`,
+        text: `鈿狅笍 Failed to receive image or attachment\n${persisted.failed.map((item) => item.reason).join("\n")}`,
         contextToken: normalized.contextToken,
         preserveBlock: true,
       }).catch(() => {});
@@ -1024,6 +1024,12 @@ class CyberbossApp {
       case "chunk":
         await this.handleChunkCommand(normalized, command);
         return;
+      case "activity":
+        await this.handleActivityCommand(normalized, command);
+        return;
+      case "reminder":
+        await this.handleReminderCommand(normalized, command);
+        return;
       case "yes":
       case "always":
       case "no":
@@ -1052,7 +1058,7 @@ class CyberbossApp {
     if (!workspaceRoot) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "💡 Usage: /bind /absolute/path",
+        text: "馃挕 Usage: /bind /absolute/path",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1061,7 +1067,7 @@ class CyberbossApp {
     if (!isAbsoluteWorkspacePath(workspaceRoot)) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "⚠️ Only absolute paths are supported for /bind.",
+        text: "鈿狅笍 Only absolute paths are supported for /bind.",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1070,7 +1076,7 @@ class CyberbossApp {
     if (!isPathWithinAllowedDirectories(workspaceRoot, this.config)) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "⚠️ The path must be within your home directory or the current working directory.",
+        text: "鈿狅笍 The path must be within your home directory or the current working directory.",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1080,7 +1086,7 @@ class CyberbossApp {
     if (!stats?.isDirectory()) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `❌ Workspace does not exist\n${workspaceRoot}`,
+        text: `鉂?Workspace does not exist\n${workspaceRoot}`,
         contextToken: normalized.contextToken,
       });
       return;
@@ -1094,7 +1100,7 @@ class CyberbossApp {
     this.runtimeAdapter.getSessionStore().setActiveWorkspaceRoot(bindingKey, workspaceRoot);
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
-      text: `✅ Workspace bound\nworkspace: ${workspaceRoot}`,
+      text: `鉁?Workspace bound\nworkspace: ${workspaceRoot}`,
       contextToken: normalized.contextToken,
     });
   }
@@ -1119,12 +1125,12 @@ class CyberbossApp {
     const effectiveModel = this.runtimeAdapter.describe().model || storedModel;
 
     const lines = [
-      `📍 workspace: ${workspaceRoot}`,
-      `🧵 thread: ${threadId || "(none)"}`,
-      `📊 status: ${threadState?.status || "idle"}`,
-      `🤖 runtime: ${runtimeName}`,
-      `🤖 model: ${effectiveModel || "(default)"}`,
-      `🤖 provider: ${storedModelProvider || "(default)"}`,
+      `馃搷 workspace: ${workspaceRoot}`,
+      `馃У thread: ${threadId || "(none)"}`,
+      `馃搳 status: ${threadState?.status || "idle"}`,
+      `馃 runtime: ${runtimeName}`,
+      `馃 model: ${effectiveModel || "(default)"}`,
+      `馃 provider: ${storedModelProvider || "(default)"}`,
     ];
     lines.push(formatContextStatusLine({
       runtimeName,
@@ -1152,7 +1158,7 @@ class CyberbossApp {
     this.runtimeAdapter.getSessionStore().clearThreadIdForWorkspace(bindingKey, workspaceRoot);
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
-      text: `✅ Switched to a fresh thread draft\nworkspace: ${workspaceRoot}`,
+      text: `鉁?Switched to a fresh thread draft\nworkspace: ${workspaceRoot}`,
       contextToken: normalized.contextToken,
     });
   }
@@ -1169,7 +1175,7 @@ class CyberbossApp {
     if (!threadId) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "💡 There is no active thread yet. Send a normal message first.",
+        text: "馃挕 There is no active thread yet. Send a normal message first.",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1191,7 +1197,7 @@ class CyberbossApp {
     } catch (error) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `❌ Reread failed\n${error instanceof Error ? error.message : String(error || "unknown error")}`,
+        text: `鉂?Reread failed\n${error instanceof Error ? error.message : String(error || "unknown error")}`,
         contextToken: normalized.contextToken,
       }).catch(() => {});
     }
@@ -1209,7 +1215,7 @@ class CyberbossApp {
     if (!threadId) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "💡 There is no active thread yet. Send a normal message first.",
+        text: "馃挕 There is no active thread yet. Send a normal message first.",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1237,13 +1243,13 @@ class CyberbossApp {
       });
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `🗜️ Compact request sent\nthread: ${threadId}`,
+        text: `馃棞锔?Compact request sent\nthread: ${threadId}`,
         contextToken: normalized.contextToken,
       });
     } catch (error) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `❌ Compact failed\n${error instanceof Error ? error.message : String(error || "unknown error")}`,
+        text: `鉂?Compact failed\n${error instanceof Error ? error.message : String(error || "unknown error")}`,
         contextToken: normalized.contextToken,
       }).catch(() => {});
     }
@@ -1254,7 +1260,7 @@ class CyberbossApp {
     if (!targetThreadId) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "💡 Usage: /switch <threadId>",
+        text: "馃挕 Usage: /switch <threadId>",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1281,7 +1287,7 @@ class CyberbossApp {
     );
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
-      text: `✅ Thread switched\nworkspace: ${workspaceRoot}\nthread: ${resumed?.threadId || targetThreadId}`,
+      text: `鉁?Thread switched\nworkspace: ${workspaceRoot}\nthread: ${resumed?.threadId || targetThreadId}`,
       contextToken: normalized.contextToken,
     });
   }
@@ -1298,7 +1304,7 @@ class CyberbossApp {
     if (!threadId || !threadState?.turnId || !["running", "waiting_approval"].includes(threadState.status)) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "💡 There is no running thread right now.",
+        text: "馃挕 There is no running thread right now.",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1311,7 +1317,7 @@ class CyberbossApp {
     });
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
-      text: `⏹️ Stop request sent\nthread: ${threadId}`,
+      text: `鈴癸笍 Stop request sent\nthread: ${threadId}`,
       contextToken: normalized.contextToken,
     });
   }
@@ -1322,7 +1328,7 @@ class CyberbossApp {
       const currentRange = this.checkinConfigStore.getRange(resolveDefaultCheckinRange());
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `⏰ Current check-in interval is ${Math.round(currentRange.minIntervalMs / 60000)}-${Math.round(currentRange.maxIntervalMs / 60000)} minutes.`,
+        text: `鈴?Current check-in interval is ${Math.round(currentRange.minIntervalMs / 60000)}-${Math.round(currentRange.maxIntervalMs / 60000)} minutes.`,
         contextToken: normalized.contextToken,
       });
       return;
@@ -1332,7 +1338,7 @@ class CyberbossApp {
     if (!parsedRange) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "💡 Usage: /checkin <min>-<max>",
+        text: "馃挕 Usage: /checkin <min>-<max>",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1344,7 +1350,7 @@ class CyberbossApp {
     });
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
-      text: `✅ Check-in interval reset to ${parsedRange.minMinutes}-${parsedRange.maxMinutes} minutes and will apply on the next polling cycle.`,
+      text: `鉁?Check-in interval reset to ${parsedRange.minMinutes}-${parsedRange.maxMinutes} minutes and will apply on the next polling cycle.`,
       contextToken: normalized.contextToken,
     });
   }
@@ -1355,7 +1361,7 @@ class CyberbossApp {
       const currentRange = this.pulseConfigStore.getRange(resolveDefaultPulseRange());
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `⏰ Current pulse interval is ${Math.round(currentRange.minIntervalMs / 60000)}-${Math.round(currentRange.maxIntervalMs / 60000)} minutes.`,
+        text: `鈴?Current pulse interval is ${Math.round(currentRange.minIntervalMs / 60000)}-${Math.round(currentRange.maxIntervalMs / 60000)} minutes.`,
         contextToken: normalized.contextToken,
       });
       return;
@@ -1365,7 +1371,7 @@ class CyberbossApp {
     if (!parsedRange) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "💡 Usage: /pulse <min>-<max>",
+        text: "馃挕 Usage: /pulse <min>-<max>",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1377,7 +1383,7 @@ class CyberbossApp {
     });
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
-      text: `✅ Pulse interval reset to ${parsedRange.minMinutes}-${parsedRange.maxMinutes} minutes and will apply on the next polling cycle.`,
+      text: `鉁?Pulse interval reset to ${parsedRange.minMinutes}-${parsedRange.maxMinutes} minutes and will apply on the next polling cycle.`,
       contextToken: normalized.contextToken,
     });
   }
@@ -1388,7 +1394,7 @@ class CyberbossApp {
       const current = this.channelAdapter.getMinChunkChars?.() ?? DEFAULT_MIN_WEIXIN_CHUNK;
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `💡 Current minimum merge chunk is ${current} characters. Usage: /chunk <number> (e.g. /chunk 50)`,
+        text: `馃挕 Current minimum merge chunk is ${current} characters. Usage: /chunk <number> (e.g. /chunk 50)`,
         contextToken: normalized.contextToken,
       });
       return;
@@ -1397,7 +1403,7 @@ class CyberbossApp {
     if (!Number.isFinite(parsed) || parsed < 1 || parsed > MAX_MIN_WEIXIN_CHUNK) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `⚠️  Invalid value. Please provide a number between 1 and ${MAX_MIN_WEIXIN_CHUNK}.`,
+        text: `鈿狅笍  Invalid value. Please provide a number between 1 and ${MAX_MIN_WEIXIN_CHUNK}.`,
         contextToken: normalized.contextToken,
       });
       return;
@@ -1405,7 +1411,109 @@ class CyberbossApp {
     const updated = this.channelAdapter.setMinChunkChars?.(parsed) ?? parsed;
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
-      text: `✅ Minimum merge chunk set to ${updated} characters. Shorter fragments will be merged into one message up to this size.`,
+      text: `鉁?Minimum merge chunk set to ${updated} characters. Shorter fragments will be merged into one message up to this size.`,
+      contextToken: normalized.contextToken,
+    });
+  }
+
+  async handleActivityCommand(normalized, command) {
+    const arg = normalizeCommandArgument(command.args);
+    const loweredArg = arg.toLowerCase();
+    const activityService = this.projectServices?.activity;
+    if (!activityService) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: "鈿狅笍 Activity service is unavailable.",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    if (!arg) {
+      const result = activityService.list({ limit: 20, includePaused: false });
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: renderActivityListText(result.activities, { title: "Open activities", activityService }),
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    if (loweredArg === "items") {
+      const result = activityService.list({ limit: 20, includePaused: false });
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: renderActivityListText(result.activities, {
+          title: "Open activities (expanded items)",
+          activityService,
+          expandItems: true,
+        }),
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    if (loweredArg === "all") {
+      const open = activityService.list({ limit: 20, includePaused: true }).activities;
+      const done = activityService.listDone({ limit: 10 }).activities;
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: renderAllActivitiesText({ open, done, activityService }),
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    const activity = activityService.getById(arg);
+    if (!activity) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: "馃挕 Activity not found.\nUsage: /activity | /activity items | /activity all | /activity <id>",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+    await this.channelAdapter.sendText({
+      userId: normalized.senderId,
+      text: renderActivityDetailText(activity, activityService),
+      contextToken: normalized.contextToken,
+    });
+  }
+
+  async handleReminderCommand(normalized, command) {
+    const arg = normalizeCommandArgument(command.args);
+    const reminderService = this.projectServices?.reminder;
+    if (!reminderService) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: "鈿狅笍 Reminder service is unavailable.",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    if (!arg || arg.toLowerCase() === "all") {
+      const result = reminderService.list({ userId: normalized.senderId, limit: 20 }, { senderId: normalized.senderId });
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: renderReminderListText(result.reminders),
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+
+    const reminder = reminderService.getById({ id: arg, userId: normalized.senderId }, { senderId: normalized.senderId });
+    if (!reminder) {
+      await this.channelAdapter.sendText({
+        userId: normalized.senderId,
+        text: "馃挕 Reminder not found.\nUsage: /reminder | /reminder all | /reminder <id>",
+        contextToken: normalized.contextToken,
+      });
+      return;
+    }
+    await this.channelAdapter.sendText({
+      userId: normalized.senderId,
+      text: renderReminderDetailText(reminder),
       contextToken: normalized.contextToken,
     });
   }
@@ -1423,7 +1531,7 @@ class CyberbossApp {
     if (!threadId || approval?.requestId == null || String(approval.requestId).trim() === "") {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "💡 There is no pending approval request right now.",
+        text: "馃挕 There is no pending approval request right now.",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1433,7 +1541,7 @@ class CyberbossApp {
     if (!approvalResponse) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: "⚠️ This Codex MCP request cannot be answered from WeChat yet.",
+        text: "鈿狅笍 This Codex MCP request cannot be answered from WeChat yet.",
         contextToken: normalized.contextToken,
       });
       return;
@@ -1495,7 +1603,7 @@ class CyberbossApp {
     if (!matched) {
       await this.channelAdapter.sendText({
         userId: normalized.senderId,
-        text: `❌ Model not found\n${query}`,
+        text: `鉂?Model not found\n${query}`,
         contextToken: normalized.contextToken,
       });
       return;
@@ -1506,7 +1614,7 @@ class CyberbossApp {
     });
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
-      text: `✅ Model switched\nworkspace: ${workspaceRoot}\nmodel: ${matched.model}`,
+      text: `鉁?Model switched\nworkspace: ${workspaceRoot}\nmodel: ${matched.model}`,
       contextToken: normalized.contextToken,
     });
   }
@@ -1515,8 +1623,8 @@ class CyberbossApp {
     await this.channelAdapter.sendText({
       userId: normalized.senderId,
       text: [
-        "⭐️ Liked this project? Throw me a star on GitHub!",
-        "It really means a lot to an indie dev working on passion projects 💖",
+        "猸愶笍 Liked this project? Throw me a star on GitHub!",
+        "It really means a lot to an indie dev working on passion projects 馃挅",
         "",
         "https://github.com/WenXiaoWendy/cyberboss",
       ].join("\n"),
@@ -1656,12 +1764,12 @@ function shouldAuditUserFollowup(text) {
     return false;
   }
   // Repeated interjections (haha, mmm, oh...) carry no action.
-  if (/^(好|嗯|哈|嘿|呵|哦|噢|唉|啊|呀|吧|嗯哼)+$/u.test(stripped)) {
+  if (/^(哈哈|呵呵|哦哦|嗯嗯|唔唔)+$/u.test(stripped)) {
     return false;
   }
   const noiseTokens = new Set([
     "好的", "好吧", "行", "对", "是的", "收到", "了解", "知道了", "知道啦", "明白",
-    "ok", "okay", "好嘞", "谢谢", "感谢", "辛苦了", "晚安", "早安", "拜拜",
+    "ok", "okay", "好哦", "谢谢", "感谢", "辛苦了", "晚安", "早安", "拜拜",
   ]);
   if (noiseTokens.has(stripped)) {
     return false;
@@ -1675,8 +1783,8 @@ function shouldAuditHabitClosure(text) {
     return false;
   }
   const completionPatterns = [
-    /(?:鍋氬畬浜唡宸茬粡鍋氫簡|寮勫畬浜唡宸茬粡寮勪簡|鎼炲畾浜唡宸茬粡澶勭悊浜唡鍚冧簡|鍚冨畬浜唡鎵撳崱浜唡瀹屾垚浜?)/u,
-    /(?:浠婂ぉ涓嶅仛浜唡涓嶅仛浜唡绠椾簡|鍏堜笉鍋氫簡|鍏堜笉寮勪簡|鏀惧純浠婂ぉ|浠婂ぉ鍏堢畻浜?)/u,
+    /(?:閸嬫艾鐣禍鍞″鑼病閸嬫矮绨瀵嫬鐣禍鍞″鑼病瀵嫪绨閹肩偛鐣炬禍鍞″鑼病婢跺嫮鎮婃禍鍞￠崥鍐х啊|閸氬啫鐣禍鍞￠幍鎾冲幢娴滃敗鐎瑰本鍨氭禍?)/u,
+    /(?:娴犲﹤銇夋稉宥呬粵娴滃敗娑撳秴浠涙禍鍞＄粻妞剧啊|閸忓牅绗夐崑姘啊|閸忓牅绗夊鍕啊|閺€鎯х磾娴犲﹤銇墊娴犲﹤銇夐崗鍫㈢暬娴?)/u,
     /\b(?:done|finished|already did|already handled|took it|completed)\b/i,
     /\b(?:not today|skip today|won't do it today|give up for today)\b/i,
   ];
@@ -1701,12 +1809,12 @@ function formatContextStatusLine({ runtimeName, context, claudeContextWindow, cl
   if (runtimeName === "claudecode") {
     const configuredWindow = Number(claudeContextWindow);
     if (!Number.isFinite(configuredWindow) || configuredWindow <= 0) {
-      return "📦 tokens: set CYBERBOSS_CLAUDE_CONTEXT_WINDOW";
+      return "馃摝 tokens: set CYBERBOSS_CLAUDE_CONTEXT_WINDOW";
     }
     if (!context || !Number.isFinite(Number(context.currentTokens))) {
-      return "📦 tokens: unavailable";
+      return "馃摝 tokens: unavailable";
     }
-    const parts = ["📦 tokens: " + formatCompactNumber(context.currentTokens) + " session | " + formatCompactNumber(configuredWindow) + " window"];
+    const parts = ["馃摝 tokens: " + formatCompactNumber(context.currentTokens) + " session | " + formatCompactNumber(configuredWindow) + " window"];
     const reservedOutputTokens = Math.max(0, Number(claudeMaxOutputTokens) || 0);
     if (reservedOutputTokens > 0) {
       parts.push("reserve " + formatCompactNumber(reservedOutputTokens));
@@ -1714,14 +1822,14 @@ function formatContextStatusLine({ runtimeName, context, claudeContextWindow, cl
     return parts.join(" | ");
   }
   if (!context) {
-    return "📦 tokens: unavailable";
+    return "馃摝 tokens: unavailable";
   }
   const sessionTotal = Number(context.currentTokens);
   const contextWindow = Number(context.contextWindow);
   if (!Number.isFinite(sessionTotal)) {
-    return "📦 tokens: unavailable";
+    return "馃摝 tokens: unavailable";
   }
-  return "📦 tokens: " + formatCompactNumber(sessionTotal) + " session" + (Number.isFinite(contextWindow) && contextWindow > 0 ? " | " + formatCompactNumber(contextWindow) + " window" : "");
+  return "馃摝 tokens: " + formatCompactNumber(sessionTotal) + " session" + (Number.isFinite(contextWindow) && contextWindow > 0 ? " | " + formatCompactNumber(contextWindow) + " window" : "");
 }
 
 function buildLocationMovementSystemText(event) {
@@ -2028,15 +2136,15 @@ function buildApprovalPromptText(approval) {
   const shouldShowReason = reasonText && normalizeText(reasonText) !== normalizeText(`Tool: ${firstCommandLine}`);
 
   const out = [];
-  out.push(`🔐 【Approval】${toolName || "Tool request"}`);
+  out.push(`馃攼 銆怉pproval銆?{toolName || "Tool request"}`);
 
   if (shouldShowReason) {
-    out.push(`📋 ${reasonText}`);
+    out.push(`馃搵 ${reasonText}`);
   }
 
   if (commandText) {
     if (firstCommandLine) {
-      out.push(`⌨️ ${firstCommandLine}`);
+      out.push(`鈱笍 ${firstCommandLine}`);
     }
     if (restCommandLines.length) {
       out.push(restCommandLines.map((line) => `  ${line}`).join("\n"));
@@ -2044,14 +2152,14 @@ function buildApprovalPromptText(approval) {
   }
 
   if (!reasonText && !commandText) {
-    out.push("❓ (unknown)");
+    out.push("鉂?(unknown)");
   }
 
-  out.push("━━━━━━━━━━━━━");
-  out.push("💬 Reply with:");
-  out.push("👉 /yes    allow once");
-  out.push("👉 /always auto-allow");
-  out.push("👉 /no     deny");
+  out.push("----------------");
+  out.push("馃挰 Reply with:");
+  out.push("馃憠 /yes    allow once");
+  out.push("馃憠 /always auto-allow");
+  out.push("馃憠 /no     deny");
 
   return out.join("\n");
 }
@@ -2103,16 +2211,16 @@ function buildApprovalResponsePayload(approval, commandName) {
 function buildApprovalResponseText(approval, commandName, approvalResponse) {
   if (approval?.kind === "mcp_tool_call" || approval?.kind === "mcp_elicitation") {
     if (commandName === "always" && isApprovalAcceptResponse(approvalResponse)) {
-      return "💡 Auto-approve enabled for this MCP tool in the current workspace.";
+      return "馃挕 Auto-approve enabled for this MCP tool in the current workspace.";
     }
     if (commandName === "yes") {
-      return "✅ This request has been approved.";
+      return "鉁?This request has been approved.";
     }
-    return "❌ This request has been cancelled.";
+    return "鉂?This request has been cancelled.";
   }
   return commandName === "always"
-    ? "💡 Auto-approve enabled for this command prefix in the current workspace."
-    : (commandName === "yes" ? "✅ This request has been approved." : "❌ This request has been denied.");
+    ? "馃挕 Auto-approve enabled for this command prefix in the current workspace."
+    : (commandName === "yes" ? "鉁?This request has been approved." : "鉂?This request has been denied.");
 }
 
 function isApprovalAcceptResponse(approvalResponse) {
@@ -2131,14 +2239,14 @@ function buildElicitationApprovalPromptText(approval) {
   const commandText = normalizeText(approval?.command);
   const approvalKind = normalizeText(elicitation?.approvalKind);
   const out = [];
-  out.push(`🔐 【Approval】${normalizeText(approval?.reason) || "MCP request"}`);
+  out.push(`馃攼 銆怉pproval銆?{normalizeText(approval?.reason) || "MCP request"}`);
   if (messageText) {
-    out.push(`📋 ${messageText.split("\n")[0]}`);
+    out.push(`馃搵 ${messageText.split("\n")[0]}`);
   }
   if (commandText) {
     const commandLines = commandText.split("\n").map((line) => normalizeText(line)).filter(Boolean);
     if (commandLines.length) {
-      out.push(`⌨️ ${commandLines[0]}`);
+      out.push(`鈱笍 ${commandLines[0]}`);
       if (commandLines.length > 1) {
         out.push(commandLines.slice(1).map((line) => `  ${line}`).join("\n"));
       }
@@ -2147,8 +2255,8 @@ function buildElicitationApprovalPromptText(approval) {
 
   const toolDescription = normalizeText(elicitation?.toolDescription);
   if (toolDescription && approvalKind === "mcp_tool_call") {
-    out.push("━━━━━━━━━━━━━");
-    out.push(`🧾 ${toolDescription}`);
+    out.push("----------------");
+    out.push(`馃Ь ${toolDescription}`);
   }
 
   const supportedCommands = new Set(
@@ -2156,19 +2264,19 @@ function buildElicitationApprovalPromptText(approval) {
       ? approval.responseTemplate.supportedCommands
       : []
   );
-  out.push("━━━━━━━━━━━━━");
-  out.push("💬 Reply with:");
+  out.push("----------------");
+  out.push("馃挰 Reply with:");
   if (supportedCommands.has("yes")) {
-    out.push("👉 /yes    allow once");
+    out.push("馃憠 /yes    allow once");
   }
   if (supportedCommands.has("always") || (supportedCommands.has("yes") && approval?.kind === "mcp_tool_call")) {
-    out.push("👉 /always auto-allow");
+    out.push("馃憠 /always auto-allow");
   }
   if (supportedCommands.has("no")) {
-    out.push("👉 /no     cancel this request");
+    out.push("馃憠 /no     cancel this request");
   }
   if (!supportedCommands.size) {
-    out.push("⚠️ This Codex MCP request cannot be answered from WeChat yet.");
+    out.push("鈿狅笍 This Codex MCP request cannot be answered from WeChat yet.");
   }
 
   return out.join("\n");
@@ -2308,6 +2416,127 @@ function groupDeferredReplies(replies) {
   return grouped;
 }
 
+function renderActivityListText(activities, { title = "Open activities", activityService, expandItems = false } = {}) {
+  const list = Array.isArray(activities) ? activities : [];
+  if (!list.length) {
+    return `${title}\n\nNone right now.`;
+  }
+  const lines = [title, ""];
+  list.forEach((activity, index) => {
+    const openItems = activityService?.listOpenItems?.(activity) || [];
+    const doneCount = activityService?.countDoneItems?.(activity) ?? 0;
+    const topOpen = openItems.slice(0, 2).map((item) => item.text).join(" / ");
+    lines.push(`${index + 1}. ${activity.title}`);
+    lines.push(`   open: ${openItems.length}  done: ${doneCount}`);
+    if (activity.nextReviewAt) {
+      lines.push(`   next review: ${formatWechatLocalTime(activity.nextReviewAt)}`);
+    }
+    if (expandItems && openItems.length) {
+      openItems.forEach((item) => lines.push(`   - ${item.text}`));
+    } else if (topOpen) {
+      lines.push(`   top open: ${topOpen}`);
+    }
+    if (index < list.length - 1) {
+      lines.push("");
+    }
+  });
+  return lines.join("\n");
+}
+
+function renderAllActivitiesText({ open = [], done = [], activityService } = {}) {
+  const sections = [];
+  sections.push(renderActivityListText(open, { title: "Open activities", activityService }));
+  if (done.length) {
+    const lines = ["", "Recent done", ""];
+    done.slice(0, 10).forEach((activity, index) => {
+      lines.push(`${index + 1}. ${activity.title}`);
+      if (activity.completedAt) {
+        lines.push(`   completed: ${formatWechatLocalTime(activity.completedAt)}`);
+      }
+      if (index < Math.min(done.length, 10) - 1) {
+        lines.push("");
+      }
+    });
+    sections.push(lines.join("\n"));
+  }
+  return sections.join("\n");
+}
+
+function renderActivityDetailText(activity, activityService) {
+  const openItems = activityService?.listOpenItems?.(activity) || [];
+  const doneItems = activityService?.listRecentlyDoneItems?.(activity, 50) || [];
+  const droppedItems = Array.isArray(activity?.items)
+    ? activity.items.filter((item) => normalizeCommandArgument(item?.status).toLowerCase() === "dropped")
+    : [];
+  const lines = [
+    `Activity: ${activity.title}`,
+    `Status: ${activity.status || "open"}`,
+  ];
+  if (activity.nextReviewAt) {
+    lines.push(`Next review: ${formatWechatLocalTime(activity.nextReviewAt)}`);
+  }
+  if (activity.lastProgressAt) {
+    lines.push(`Last progress: ${formatWechatLocalTime(activity.lastProgressAt)}`);
+  }
+  lines.push("", "Open");
+  if (openItems.length) {
+    openItems.forEach((item) => lines.push(`- ${item.text}`));
+  } else {
+    lines.push("- (none)");
+  }
+  if (doneItems.length) {
+    lines.push("", "Done");
+    doneItems.forEach((item) => lines.push(`- ${item.text}`));
+  }
+  if (droppedItems.length) {
+    lines.push("", "Dropped");
+    droppedItems.forEach((item) => lines.push(`- ${item.text}`));
+  }
+  return lines.join("\n");
+}
+
+function renderReminderListText(reminders) {
+  const list = Array.isArray(reminders) ? reminders : [];
+  if (!list.length) {
+    return "Active reminders\n\nNone right now.";
+  }
+  const lines = ["Active reminders", ""];
+  list.forEach((reminder, index) => {
+    lines.push(`${index + 1}. ${reminder.text}`);
+    lines.push(`   due: ${formatReminderDueLabel(reminder)}`);
+    lines.push(`   follow-up: every ${Number(reminder.followupDelayMinutes || 15)} min until resolved`);
+    if (reminder.activityId) {
+      lines.push(`   linked activity: ${reminder.activityId}`);
+    }
+    if (index < list.length - 1) {
+      lines.push("");
+    }
+  });
+  return lines.join("\n");
+}
+
+function renderReminderDetailText(reminder) {
+  const lines = [
+    `Reminder: ${reminder.text}`,
+    "Status: active",
+    `Due: ${formatReminderDueLabel(reminder)}`,
+    `Trigger count: ${Number(reminder.triggerCount || 0)}`,
+    `Follow-up: every ${Number(reminder.followupDelayMinutes || 15)} min until resolved`,
+  ];
+  if (reminder.activityId) {
+    lines.push(`Linked activity: ${reminder.activityId}`);
+  }
+  return lines.join("\n");
+}
+
+function formatReminderDueLabel(reminder) {
+  const dueAtMs = Number(reminder?.dueAtMs || 0);
+  if (!Number.isFinite(dueAtMs) || dueAtMs <= 0) {
+    return "(unknown)";
+  }
+  return formatWechatLocalTime(new Date(dueAtMs).toISOString());
+}
+
 function formatWechatLocalTime(receivedAt) {
   const value = typeof receivedAt === "string" ? receivedAt.trim() : "";
   if (!value) {
@@ -2338,3 +2567,4 @@ function stringifyRpcId(value) {
 function hasRpcId(value) {
   return stringifyRpcId(value) !== "";
 }
+

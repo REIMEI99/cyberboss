@@ -151,6 +151,30 @@ test("random pulse system reply falls back to a natural message when model retur
   assert.equal(outcome?.fallback, true);
 });
 
+test("activity review system reply falls back to a natural message when model returns silent", async () => {
+  const { sent, streamDelivery } = createHarness();
+  streamDelivery.queueReplyTargetForThread("thread-1ar", {
+    userId: "user-1ar",
+    contextToken: "ctx-1ar",
+    provider: "system",
+    systemKind: "pulse",
+    systemSource: "activity_review",
+  });
+
+  await runCompletedTurn(streamDelivery, {
+    threadId: "thread-1ar",
+    turnId: "turn-1ar",
+    itemId: "item-1ar",
+    text: "{\"action\":\"silent\"}",
+  });
+
+  assert.equal(sent.length, 1);
+  assert.match(sent[0].text, /刚想到你手头那件事|还在推进吗/);
+  const outcome = streamDelivery.consumeCompletedSystemReplyOutcome("thread-1ar:turn-1ar");
+  assert.equal(outcome?.kind, "send_message");
+  assert.equal(outcome?.fallback, true);
+});
+
 test("system send_message JSON sends only the message text", async () => {
   const { sent, streamDelivery } = createHarness();
   streamDelivery.queueReplyTargetForThread("thread-2", {

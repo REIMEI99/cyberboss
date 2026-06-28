@@ -1,4 +1,4 @@
-function createAppBackgroundOps(app) {
+ï»¿function createAppBackgroundOps(app) {
   return {
     flushPendingSystemMessages: () => flushPendingSystemMessages(app),
     flushPendingTimelineScreenshots: (account) => flushPendingTimelineScreenshots(app, account),
@@ -51,7 +51,7 @@ async function flushPendingTimelineScreenshots(app, account) {
       }).catch(() => {});
       await app.channelAdapter.sendText({
         userId: job.senderId,
-        text: `â?Timeline screenshot failed\n${messageText}`,
+        text: `Timeline screenshot failed\n${messageText}`,
         preserveBlock: true,
       }).catch(() => {});
     }
@@ -64,12 +64,13 @@ async function flushDueReminders(app, account) {
     .filter((reminder) => reminder.accountId === account.accountId);
 
   for (const reminder of dueReminders) {
+    const followupDelayMs = resolveReminderFollowupDelayMs(reminder);
     try {
       const deferred = app.reminderQueue.defer({
         id: reminder.id,
-        dueAtMs: Date.now() + resolveReminderFollowupDelayMs(reminder),
+        dueAtMs: Date.now() + followupDelayMs,
       });
-      console.log(`[cyberboss] reminder fired id=${reminder.id} triggerCount=${deferred.triggerCount} nextFire=${Math.round(resolveReminderFollowupDelayMs(reminder) / 60000)}m text=${JSON.stringify(reminder.text.slice(0, 60))}`);
+      console.log(`[cyberboss] hard reminder fired id=${reminder.id} triggerCount=${deferred.triggerCount} nextFire=${Math.round(followupDelayMs / 60000)}m text=${JSON.stringify(reminder.text.slice(0, 60))}`);
     } catch {
       try {
         app.reminderQueue.defer({
@@ -86,6 +87,7 @@ async function flushDueReminders(app, account) {
         senderId: reminder.senderId,
         workspaceRoot: app.resolveReminderWorkspaceRoot(reminder),
         kind: "reminder",
+        source: "hard_reminder",
         text: buildReminderSystemTrigger(reminder, app.config),
         createdAt: new Date().toISOString(),
       });
@@ -99,20 +101,21 @@ async function flushDueReminders(app, account) {
 function buildReminderSystemTrigger(reminder, config) {
   const body = normalizeText(reminder?.text);
   const userName = normalizeText(config?.userName) || "the user";
-  const followupDelayMinutes = Number.parseInt(String(reminder?.followupDelayMinutes || ""), 10);
-  const effectiveFollowupDelayMinutes = Number.isFinite(followupDelayMinutes) && followupDelayMinutes > 0
-    ? followupDelayMinutes
-    : 15;
+  const effectiveFollowupDelayMinutes = resolveReminderFollowupDelayMinutes(reminder);
   if (!body) {
-    return `A due reminder fired for ${userName}. Act now. This reminder stays active until explicit completion, and the queue has already scheduled the next check in about ${effectiveFollowupDelayMinutes} minutes unless you later clear it.`;
+    return `A hard reminder fired for ${userName}. Act now. This reminder stays active until explicit completion, and the queue has already scheduled the next check in about ${effectiveFollowupDelayMinutes} minutes unless you later clear it.`;
   }
-  return `A due reminder fired for ${userName}. Reminder: ${body}\nThis reminder stays active until explicit completion, and the queue has already scheduled the next check in about ${effectiveFollowupDelayMinutes} minutes unless you later clear it.\nDo not assume the user already acted just because the reminder fired.\nYour default action for a due reminder is to send a message to the user. Only return silent if the user just told you in the current turn that the task is done. If recent context clearly shows the user already did it, list active reminders and clear the matching one. Otherwise, send a brief natural message to check in with the user about this reminder.`;
+  return `A hard reminder fired for ${userName}. Reminder: ${body}\nThis reminder stays active until explicit completion, and the queue has already scheduled the next check in about ${effectiveFollowupDelayMinutes} minutes unless you later clear it.\nDo not assume the user already acted just because the reminder fired.\nYour default action for a hard reminder is to send a message to the user. Only return silent if the user just told you in the current turn that the task is done. If recent context clearly shows the user already did it, list active reminders and clear the matching one. Otherwise, send a brief natural message to check in with the user about this reminder.`;
 }
 
 function resolveReminderFollowupDelayMs(reminder) {
+  return resolveReminderFollowupDelayMinutes(reminder) * 60_000;
+}
+
+function resolveReminderFollowupDelayMinutes(reminder) {
   const minutes = Number.parseInt(String(reminder?.followupDelayMinutes || ""), 10);
-  const effectiveMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 15;
-  return effectiveMinutes * 60_000;
+  const effectiveMinutes = Number.isFinite(minutes) && minutes > 0 ? minutes : 10;
+  return Math.max(5, effectiveMinutes);
 }
 
 function normalizeText(value) {

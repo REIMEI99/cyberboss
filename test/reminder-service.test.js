@@ -41,10 +41,10 @@ function seedAccountFiles(config) {
 }
 
 test("resolveFollowupDelayMinutes defaults to short sticky cadence", () => {
-  assert.equal(resolveFollowupDelayMinutes({}), 15);
+  assert.equal(resolveFollowupDelayMinutes({}), 10);
   assert.equal(resolveFollowupDelayMinutes({ delayMinutes: 2 }), 5);
   assert.equal(resolveFollowupDelayMinutes({ delayMinutes: 45 }), 45);
-  assert.equal(resolveFollowupDelayMinutes({ dueAt: "2026-06-21T10:00:00+08:00" }), 30);
+  assert.equal(resolveFollowupDelayMinutes({ dueAt: "2026-06-21T10:00:00+08:00" }), 10);
 });
 
 test("reminder service creates sticky reminders and can list and complete them", async () => {

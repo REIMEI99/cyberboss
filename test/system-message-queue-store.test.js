@@ -28,13 +28,19 @@ test("system message queue preserves source, kind and expiresAt metadata", () =>
   const queued = store.enqueue(baseMessage({
     kind: "pulse",
     source: "checkin",
+    activityId: "activity-1",
     expiresAt: "2026-06-18T17:30:00.000Z",
   }));
 
   assert.equal(queued.kind, "pulse");
   assert.equal(queued.source, "checkin");
+  assert.equal(queued.activityId, "activity-1");
   assert.equal(queued.expiresAt, "2026-06-18T17:30:00.000Z");
   assert.equal(store.hasPendingForAccount("account-1"), true);
+  assert.equal(store.hasPendingForAccount("account-1", { source: "checkin" }), true);
+  assert.equal(store.hasPendingForAccount("account-1", { source: "checkin", activityId: "activity-1" }), true);
+  assert.equal(store.hasPendingForAccount("account-1", { source: "checkin", activityId: "activity-2" }), false);
+  assert.equal(store.hasPendingForAccount("account-1", { source: "random_pulse" }), false);
 });
 
 test("pruneStaleForAccount removes expired checkins without touching other system messages", () => {

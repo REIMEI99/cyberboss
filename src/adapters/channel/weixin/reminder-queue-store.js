@@ -148,7 +148,7 @@ function normalizeReminder(reminder) {
     dueAtMs,
     createdAt: createdAt || new Date().toISOString(),
     activityId,
-    followupDelayMinutes: Number.isFinite(followupDelayMinutes) && followupDelayMinutes > 0 ? followupDelayMinutes : 15,
+    followupDelayMinutes: Number.isFinite(followupDelayMinutes) && followupDelayMinutes > 0 ? followupDelayMinutes : 10,
     lastTriggeredAt: lastTriggeredAt || "",
     triggerCount: Number.isFinite(triggerCount) && triggerCount > 0 ? triggerCount : 0,
   };

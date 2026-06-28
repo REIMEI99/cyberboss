@@ -3,14 +3,19 @@ const path = require("path");
 const crypto = require("crypto");
 
 const MAX_OPEN = 40;
-const MAX_DONE = 5;
+const MAX_DONE = 20;
 const DEFAULT_CHECKBACK_MINUTES = 10;
+const DEFAULT_REVIEW_MIN_MINUTES = 120;
+const DEFAULT_REVIEW_MAX_MINUTES = 360;
+const ACTIVE_STATUSES = new Set(["open", "paused"]);
+const CLOSED_STATUSES = new Set(["done", "archived"]);
+const ITEM_STATUSES = new Set(["open", "done", "dropped"]);
 
 class ActivityService {
   constructor({ config }) {
     this.config = config;
     this.filePath = config.activityFile;
-    this.state = { open: [], done: [] };
+    this.state = { activities: [] };
     this.ensureParentDirectory();
     this.load();
     this.migrateTitlePool();
@@ -40,15 +45,21 @@ class ActivityService {
     const now = new Date().toISOString();
     const migrated = items
       .filter((item) => item && normalizeText(item.title))
-      .map((item) => ({
+      .map((item) => normalizeActivity({
         id: crypto.randomUUID(),
         title: normalizeText(item.title),
+        status: "open",
+        items: [],
         reminderId: "",
         createdAt: normalizeIsoTime(item.createdAt) || now,
-      }));
+        updatedAt: normalizeIsoTime(item.createdAt) || now,
+        reviewMinMinutes: DEFAULT_REVIEW_MIN_MINUTES,
+        reviewMaxMinutes: DEFAULT_REVIEW_MAX_MINUTES,
+      }))
+      .filter(Boolean);
     if (!migrated.length) return;
-    this.state.open.push(...migrated);
-    this.pruneOpen();
+    this.state.activities.unshift(...migrated);
+    this.pruneState();
     this.save();
     console.log(`[cyberboss] migrated ${migrated.length} title-pool items into open activities`);
     try {
@@ -63,147 +74,200 @@ class ActivityService {
     try {
       const raw = fs.readFileSync(this.filePath, "utf8");
       const parsed = JSON.parse(raw);
-      // Migrate old format { activities: [...] } to { open: [...], done: [...] }
-      if (Array.isArray(parsed?.activities) && !Array.isArray(parsed?.open)) {
-        this.migrateOldFormat(parsed.activities);
-        return;
-      }
-      this.state = {
-        open: Array.isArray(parsed?.open) ? parsed.open.map(normalizeActivity).filter(Boolean) : [],
-        done: Array.isArray(parsed?.done) ? parsed.done.map(normalizeActivity).filter(Boolean).slice(0, MAX_DONE) : [],
-      };
+      this.state = normalizeActivityState(parsed);
     } catch {
-      this.state = { open: [], done: [] };
+      this.state = { activities: [] };
     }
-  }
-
-  migrateOldFormat(activities) {
-    const now = new Date().toISOString();
-    this.state = {
-      open: activities
-        .filter((a) => a && (a.state === "intended" || a.state === "active"))
-        .map((a) => ({
-          id: a.id || crypto.randomUUID(),
-          title: normalizeText(a.title),
-          reminderId: "",
-          createdAt: normalizeIsoTime(a.createdAt) || normalizeIsoTime(a.intendedAt) || now,
-        }))
-        .filter((a) => a.title)
-        .slice(0, MAX_OPEN),
-      done: activities
-        .filter((a) => a && a.state === "done")
-        .map((a) => ({
-          id: a.id || crypto.randomUUID(),
-          title: normalizeText(a.title),
-          reminderId: "",
-          createdAt: normalizeIsoTime(a.createdAt) || now,
-          completedAt: normalizeIsoTime(a.completedAt) || normalizeIsoTime(a.updatedAt) || now,
-        }))
-        .filter((a) => a.title)
-        .slice(0, MAX_DONE),
-    };
-    this.save();
-    console.log(`[cyberboss] migrated old activity format: ${this.state.open.length} open, ${this.state.done.length} done`);
   }
 
   save() {
     fs.writeFileSync(this.filePath, JSON.stringify(this.state, null, 2));
   }
 
-  add({ title = "", items, reminderId = "" } = {}) {
+  add({
+    title = "",
+    items,
+    reminderId = "",
+    reviewMinMinutes = DEFAULT_REVIEW_MIN_MINUTES,
+    reviewMaxMinutes = DEFAULT_REVIEW_MAX_MINUTES,
+    nextReviewAt = "",
+  } = {}) {
     this.load();
     const normalizedTitle = normalizeText(title);
     if (!normalizedTitle) {
       throw new Error("Activity add requires a non-empty title.");
     }
     const now = new Date().toISOString();
-    const activity = {
+    const activity = normalizeActivity({
       id: crypto.randomUUID(),
       title: normalizedTitle,
-      items: normalizeItems(items),
+      status: "open",
+      items: normalizeItems(items, { referenceTime: now }),
       reminderId: normalizeText(reminderId),
+      nextReviewAt: normalizeIsoTime(nextReviewAt),
+      lastReviewedAt: "",
+      lastProgressAt: "",
+      reviewMinMinutes,
+      reviewMaxMinutes,
       createdAt: now,
-    };
-    this.state.open.unshift(activity);
-    this.pruneOpen();
+      updatedAt: now,
+    });
+    this.state.activities.unshift(activity);
+    this.pruneState();
     this.save();
-    return activity;
+    return cloneActivity(activity);
+  }
+
+  getById(id = "") {
+    this.load();
+    const activity = this.findActivity(id);
+    return activity ? cloneActivity(activity) : null;
   }
 
   bindReminder({ id = "", reminderId = "" } = {}) {
     this.load();
-    const normalizedId = normalizeText(id);
-    if (!normalizedId) {
-      throw new Error("Activity bindReminder requires id.");
-    }
-    const activity = this.state.open.find((a) => a.id === normalizedId);
-    if (!activity) {
-      throw new Error(`Activity not found: ${normalizedId}`);
-    }
+    const activity = this.requireOpenActivity(id, "Activity bindReminder requires id.");
     activity.reminderId = normalizeText(reminderId);
+    activity.updatedAt = new Date().toISOString();
     this.save();
-    return { ...activity };
+    return cloneActivity(activity);
   }
 
   addItem({ id = "", text = "" } = {}) {
     this.load();
-    const normalizedId = normalizeText(id);
-    if (!normalizedId) {
-      throw new Error("Activity addItem requires id.");
-    }
-    const activity = this.state.open.find((a) => a.id === normalizedId);
-    if (!activity) {
-      throw new Error(`Activity not found: ${normalizedId}`);
-    }
+    const activity = this.requireOpenActivity(id, "Activity addItem requires id.");
     const normalizedText = normalizeText(text);
     if (!normalizedText) {
       throw new Error("Activity addItem requires non-empty text.");
     }
-    if (!Array.isArray(activity.items)) {
-      activity.items = [];
-    }
-    activity.items.push(normalizedText);
+    const now = new Date().toISOString();
+    activity.items.push({
+      id: crypto.randomUUID(),
+      text: normalizedText,
+      status: "open",
+      updatedAt: now,
+      doneAt: "",
+    });
+    activity.lastProgressAt = now;
+    activity.updatedAt = now;
     this.save();
-    return { ...activity };
+    return cloneActivity(activity);
+  }
+
+  markItemDone({ id = "", itemId = "" } = {}) {
+    this.load();
+    const activity = this.requireActivity(id, "Activity markItemDone requires id.");
+    const item = requireItem(activity, itemId, "Activity markItemDone requires itemId.");
+    const now = new Date().toISOString();
+    item.status = "done";
+    item.doneAt = now;
+    item.updatedAt = now;
+    activity.lastProgressAt = now;
+    activity.updatedAt = now;
+    this.save();
+    return cloneActivity(activity);
+  }
+
+  markItemDropped({ id = "", itemId = "" } = {}) {
+    this.load();
+    const activity = this.requireActivity(id, "Activity markItemDropped requires id.");
+    const item = requireItem(activity, itemId, "Activity markItemDropped requires itemId.");
+    const now = new Date().toISOString();
+    item.status = "dropped";
+    item.doneAt = "";
+    item.updatedAt = now;
+    activity.lastProgressAt = now;
+    activity.updatedAt = now;
+    this.save();
+    return cloneActivity(activity);
+  }
+
+  updateActivityReview({
+    id = "",
+    nextReviewAt = "",
+    lastReviewedAt = "",
+    reviewMinMinutes = undefined,
+    reviewMaxMinutes = undefined,
+  } = {}) {
+    this.load();
+    const activity = this.requireActivity(id, "Activity updateActivityReview requires id.");
+    const now = new Date().toISOString();
+    if (nextReviewAt !== undefined) {
+      activity.nextReviewAt = normalizeIsoTime(nextReviewAt);
+    }
+    if (lastReviewedAt !== undefined) {
+      activity.lastReviewedAt = normalizeIsoTime(lastReviewedAt) || now;
+    }
+    if (reviewMinMinutes !== undefined) {
+      activity.reviewMinMinutes = normalizePositiveInteger(reviewMinMinutes, DEFAULT_REVIEW_MIN_MINUTES);
+    }
+    if (reviewMaxMinutes !== undefined) {
+      const normalizedMax = normalizePositiveInteger(reviewMaxMinutes, DEFAULT_REVIEW_MAX_MINUTES);
+      activity.reviewMaxMinutes = Math.max(activity.reviewMinMinutes, normalizedMax);
+    }
+    activity.updatedAt = now;
+    this.save();
+    return cloneActivity(activity);
+  }
+
+  pauseActivity({ id = "" } = {}) {
+    this.load();
+    const activity = this.requireOpenActivity(id, "Activity pauseActivity requires id.");
+    const now = new Date().toISOString();
+    activity.status = "paused";
+    activity.nextReviewAt = "";
+    activity.updatedAt = now;
+    this.save();
+    return cloneActivity(activity);
+  }
+
+  reopenActivity({ id = "", nextReviewAt = "" } = {}) {
+    this.load();
+    const activity = this.requireActivity(id, "Activity reopenActivity requires id.");
+    const now = new Date().toISOString();
+    activity.status = "open";
+    if (nextReviewAt) {
+      activity.nextReviewAt = normalizeIsoTime(nextReviewAt);
+    }
+    activity.updatedAt = now;
+    this.save();
+    return cloneActivity(activity);
   }
 
   complete({ id = "" } = {}) {
     this.load();
-    const normalizedId = normalizeText(id);
-    if (!normalizedId) {
-      throw new Error("Activity complete requires id.");
-    }
-    const index = this.state.open.findIndex((a) => a.id === normalizedId);
-    if (index < 0) {
-      throw new Error(`Activity not found: ${normalizedId}`);
-    }
-    const [activity] = this.state.open.splice(index, 1);
+    const activity = this.requireOpenActivity(id, "Activity complete requires id.");
     const now = new Date().toISOString();
-    const doneActivity = { ...activity, completedAt: now };
-    this.state.done.unshift(doneActivity);
-    this.state.done = this.state.done.slice(0, MAX_DONE);
+    activity.status = "done";
+    activity.completedAt = now;
+    activity.nextReviewAt = "";
+    activity.updatedAt = now;
+    this.pruneState();
     this.save();
-    return { ...doneActivity, remainingOpenCount: this.state.open.length };
+    return { ...cloneActivity(activity), remainingOpenCount: this.list({ limit: MAX_OPEN }).count };
   }
 
   drop({ id = "" } = {}) {
     this.load();
-    const normalizedId = normalizeText(id);
-    if (!normalizedId) {
-      throw new Error("Activity drop requires id.");
-    }
-    const index = this.state.open.findIndex((a) => a.id === normalizedId);
-    if (index < 0) {
-      throw new Error(`Activity not found: ${normalizedId}`);
-    }
-    const [activity] = this.state.open.splice(index, 1);
+    const activity = this.requireOpenActivity(id, "Activity drop requires id.");
+    const now = new Date().toISOString();
+    activity.status = "archived";
+    activity.archivedAt = now;
+    activity.nextReviewAt = "";
+    activity.updatedAt = now;
+    this.pruneState();
     this.save();
-    return { ...activity, remainingOpenCount: this.state.open.length };
+    return { ...cloneActivity(activity), remainingOpenCount: this.list({ limit: MAX_OPEN }).count };
   }
 
-  list({ limit = 20 } = {}) {
+  list({ limit = 20, includePaused = false, includeArchived = false, statuses = undefined } = {}) {
     this.load();
-    const activities = this.state.open.slice(0, normalizeLimit(limit));
+    const normalizedLimit = normalizeLimit(limit);
+    const allowedStatuses = normalizeStatusFilter(statuses, includePaused, includeArchived);
+    const activities = this.state.activities
+      .filter((activity) => allowedStatuses.has(activity.status))
+      .slice(0, normalizedLimit)
+      .map(cloneActivity);
     return {
       count: activities.length,
       activities,
@@ -212,19 +276,35 @@ class ActivityService {
 
   listDone({ limit = MAX_DONE } = {}) {
     this.load();
-    const activities = this.state.done.slice(0, Math.min(limit, MAX_DONE));
+    const activities = this.state.activities
+      .filter((activity) => activity.status === "done")
+      .slice(0, Math.min(normalizeLimit(limit), MAX_DONE))
+      .map(cloneActivity);
     return {
       count: activities.length,
       activities,
     };
   }
 
+  listDueReviews(nowMs = Date.now(), { limit = MAX_OPEN } = {}) {
+    this.load();
+    const due = this.state.activities
+      .filter((activity) => activity.status === "open")
+      .filter((activity) => {
+        const dueAtMs = Date.parse(activity.nextReviewAt || "");
+        return Number.isFinite(dueAtMs) && dueAtMs > 0 && dueAtMs <= nowMs;
+      })
+      .slice(0, normalizeLimit(limit))
+      .map(cloneActivity);
+    return {
+      count: due.length,
+      activities: due,
+    };
+  }
+
   allIds() {
     this.load();
-    return [
-      ...this.state.open.map((a) => a.id),
-      ...this.state.done.map((a) => a.id),
-    ];
+    return this.state.activities.map((activity) => activity.id);
   }
 
   remove({ id = "" } = {}) {
@@ -233,58 +313,202 @@ class ActivityService {
     if (!normalizedId) {
       throw new Error("Activity remove requires id.");
     }
-    let index = this.state.open.findIndex((a) => a.id === normalizedId);
-    if (index >= 0) {
-      const [removed] = this.state.open.splice(index, 1);
-      this.save();
-      return removed;
+    const index = this.state.activities.findIndex((activity) => activity.id === normalizedId);
+    if (index < 0) {
+      throw new Error(`Activity not found: ${normalizedId}`);
     }
-    index = this.state.done.findIndex((a) => a.id === normalizedId);
-    if (index >= 0) {
-      const [removed] = this.state.done.splice(index, 1);
-      this.save();
-      return removed;
-    }
-    throw new Error(`Activity not found: ${normalizedId}`);
+    const [removed] = this.state.activities.splice(index, 1);
+    this.save();
+    return cloneActivity(removed);
   }
 
-  pruneOpen() {
-    if (this.state.open.length > MAX_OPEN) {
-      this.state.open = this.state.open.slice(0, MAX_OPEN);
+  countOpenItems(activity) {
+    return listItemsByStatus(activity, "open").length;
+  }
+
+  countDoneItems(activity) {
+    return listItemsByStatus(activity, "done").length;
+  }
+
+  listOpenItems(activity) {
+    return listItemsByStatus(activity, "open").map(cloneItem);
+  }
+
+  listRecentlyDoneItems(activity, limit = 3) {
+    return listItemsByStatus(activity, "done")
+      .slice()
+      .sort((left, right) => (Date.parse(right.doneAt || "") || 0) - (Date.parse(left.doneAt || "") || 0))
+      .slice(0, Math.max(0, Number(limit) || 0))
+      .map(cloneItem);
+  }
+
+  pruneState() {
+    const open = this.state.activities
+      .filter((activity) => ACTIVE_STATUSES.has(activity.status))
+      .slice(0, MAX_OPEN);
+    const done = this.state.activities
+      .filter((activity) => activity.status === "done")
+      .slice(0, MAX_DONE);
+    const archived = this.state.activities
+      .filter((activity) => activity.status === "archived");
+    this.state.activities = [...open, ...done, ...archived];
+  }
+
+  findActivity(id = "") {
+    const normalizedId = normalizeText(id);
+    if (!normalizedId) return null;
+    return this.state.activities.find((activity) => activity.id === normalizedId) || null;
+  }
+
+  requireActivity(id = "", errorText = "Activity requires id.") {
+    const normalizedId = normalizeText(id);
+    if (!normalizedId) {
+      throw new Error(errorText);
     }
+    const activity = this.findActivity(normalizedId);
+    if (!activity) {
+      throw new Error(`Activity not found: ${normalizedId}`);
+    }
+    return activity;
+  }
+
+  requireOpenActivity(id = "", errorText = "Activity requires id.") {
+    const activity = this.requireActivity(id, errorText);
+    if (!ACTIVE_STATUSES.has(activity.status)) {
+      throw new Error(`Activity not open: ${activity.id}`);
+    }
+    return activity;
   }
 }
 
-function normalizeItems(value) {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((item) => (typeof item === "string" ? item.trim() : ""))
-    .filter(Boolean);
+function normalizeActivityState(parsed) {
+  if (Array.isArray(parsed?.activities)) {
+    return {
+      activities: parsed.activities
+        .map((activity) => normalizeActivity(activity))
+        .filter(Boolean),
+    };
+  }
+  const openActivities = Array.isArray(parsed?.open)
+    ? parsed.open
+      .map((activity) => normalizeActivity({ ...activity, status: normalizeText(activity?.status) || "open" }))
+      .filter(Boolean)
+    : [];
+  const doneActivities = Array.isArray(parsed?.done)
+    ? parsed.done
+      .map((activity) => normalizeActivity({ ...activity, status: "done" }))
+      .filter(Boolean)
+    : [];
+  return { activities: [...openActivities, ...doneActivities] };
 }
 
 function normalizeActivity(value) {
   if (!value || typeof value !== "object") return null;
-  const id = normalizeText(value.id);
+  const id = normalizeText(value.id) || crypto.randomUUID();
   const title = normalizeText(value.title);
-  if (!id || !title) return null;
-  const result = {
+  if (!title) return null;
+  const status = normalizeActivityStatus(value.status);
+  const createdAt = normalizeIsoTime(value.createdAt) || new Date().toISOString();
+  const updatedAt = normalizeIsoTime(value.updatedAt) || createdAt;
+  const completedAt = status === "done"
+    ? (normalizeIsoTime(value.completedAt) || updatedAt)
+    : "";
+  const archivedAt = status === "archived"
+    ? (normalizeIsoTime(value.archivedAt) || updatedAt)
+    : "";
+  const activity = {
     id,
     title,
-    items: normalizeItems(value.items),
+    status,
+    items: normalizeItems(value.items, { referenceTime: updatedAt }),
     reminderId: normalizeText(value.reminderId),
-    createdAt: normalizeIsoTime(value.createdAt) || new Date().toISOString(),
+    nextReviewAt: normalizeIsoTime(value.nextReviewAt),
+    lastReviewedAt: normalizeIsoTime(value.lastReviewedAt),
+    lastProgressAt: normalizeIsoTime(value.lastProgressAt),
+    reviewMinMinutes: normalizePositiveInteger(value.reviewMinMinutes, DEFAULT_REVIEW_MIN_MINUTES),
+    reviewMaxMinutes: Math.max(
+      normalizePositiveInteger(value.reviewMinMinutes, DEFAULT_REVIEW_MIN_MINUTES),
+      normalizePositiveInteger(value.reviewMaxMinutes, DEFAULT_REVIEW_MAX_MINUTES)
+    ),
+    createdAt,
+    updatedAt,
   };
-  const completedAt = normalizeIsoTime(value.completedAt);
   if (completedAt) {
-    result.completedAt = completedAt;
+    activity.completedAt = completedAt;
   }
-  return result;
+  if (archivedAt) {
+    activity.archivedAt = archivedAt;
+  }
+  return activity;
+}
+
+function normalizeItems(value, { referenceTime = "" } = {}) {
+  if (!Array.isArray(value)) return [];
+  const fallbackTime = normalizeIsoTime(referenceTime) || new Date().toISOString();
+  return value
+    .map((item) => normalizeItem(item, fallbackTime))
+    .filter(Boolean);
+}
+
+function normalizeItem(value, fallbackTime) {
+  if (typeof value === "string") {
+    const text = normalizeText(value);
+    if (!text) return null;
+    return {
+      id: crypto.randomUUID(),
+      text,
+      status: "open",
+      updatedAt: fallbackTime,
+      doneAt: "",
+    };
+  }
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const text = normalizeText(value.text || value.title);
+  if (!text) return null;
+  const status = normalizeItemStatus(value.status);
+  const updatedAt = normalizeIsoTime(value.updatedAt) || fallbackTime;
+  const doneAt = status === "done"
+    ? (normalizeIsoTime(value.doneAt || value.completedAt) || updatedAt)
+    : "";
+  return {
+    id: normalizeText(value.id) || crypto.randomUUID(),
+    text,
+    status,
+    updatedAt,
+    doneAt,
+  };
+}
+
+function normalizeActivityStatus(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (ACTIVE_STATUSES.has(normalized) || CLOSED_STATUSES.has(normalized)) {
+    return normalized;
+  }
+  return "open";
+}
+
+function normalizeItemStatus(value) {
+  const normalized = normalizeText(value).toLowerCase();
+  if (ITEM_STATUSES.has(normalized)) {
+    return normalized;
+  }
+  if (normalized === "completed") {
+    return "done";
+  }
+  return "open";
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function normalizeLimit(value) {
   const parsed = Number.parseInt(String(value || ""), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return 20;
-  return Math.min(parsed, MAX_OPEN);
+  return Math.min(parsed, Math.max(MAX_OPEN, MAX_DONE));
 }
 
 function normalizeIsoTime(value) {
@@ -298,4 +522,56 @@ function normalizeText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
-module.exports = { ActivityService, MAX_OPEN, MAX_DONE, DEFAULT_CHECKBACK_MINUTES };
+function cloneActivity(activity) {
+  return activity ? JSON.parse(JSON.stringify(activity)) : null;
+}
+
+function cloneItem(item) {
+  return item ? JSON.parse(JSON.stringify(item)) : null;
+}
+
+function listItemsByStatus(activity, status) {
+  const normalizedStatus = normalizeItemStatus(status);
+  const items = Array.isArray(activity?.items) ? activity.items : [];
+  return items.filter((item) => normalizeItemStatus(item?.status) === normalizedStatus);
+}
+
+function requireItem(activity, itemId, errorText) {
+  const normalizedItemId = normalizeText(itemId);
+  if (!normalizedItemId) {
+    throw new Error(errorText);
+  }
+  const item = Array.isArray(activity?.items)
+    ? activity.items.find((candidate) => candidate.id === normalizedItemId)
+    : null;
+  if (!item) {
+    throw new Error(`Activity item not found: ${normalizedItemId}`);
+  }
+  return item;
+}
+
+function normalizeStatusFilter(statuses, includePaused, includeArchived) {
+  const normalized = Array.isArray(statuses)
+    ? statuses.map((status) => normalizeActivityStatus(status))
+    : null;
+  if (normalized?.length) {
+    return new Set(normalized);
+  }
+  const defaults = ["open"];
+  if (includePaused) {
+    defaults.push("paused");
+  }
+  if (includeArchived) {
+    defaults.push("archived");
+  }
+  return new Set(defaults);
+}
+
+module.exports = {
+  ActivityService,
+  MAX_OPEN,
+  MAX_DONE,
+  DEFAULT_CHECKBACK_MINUTES,
+  DEFAULT_REVIEW_MIN_MINUTES,
+  DEFAULT_REVIEW_MAX_MINUTES,
+};

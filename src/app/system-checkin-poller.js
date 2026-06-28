@@ -5,7 +5,9 @@ const { SessionStore } = require("../adapters/runtime/codex/session-store");
 const { PulseConfigStore, resolveDefaultPulseRange } = require("../core/pulse-config-store");
 const { resolvePreferredSenderId, resolvePreferredWorkspaceRoot } = require("../core/default-targets");
 const { SystemMessageQueueStore } = require("../core/system-message-queue-store");
+const { HabitService } = require("../habit/habit-service");
 const { AgentMemoryService } = require("../services/agent-memory-service");
+const { ActivityService } = require("../services/activity-service");
 const { ObsidianService } = require("../services/obsidian-service");
 const { RuntimeContextStore } = require("../tools/runtime-context-store");
 
@@ -15,6 +17,8 @@ const CHECKIN_SYSTEM_MESSAGE_SOURCE = "contact_gap_pulse";
 const CHECKIN_SYSTEM_MESSAGE_TTL_MS = 30 * 60 * 1000;
 const RANDOM_PULSE_SYSTEM_MESSAGE_SOURCE = "random_pulse";
 const RANDOM_PULSE_SYSTEM_MESSAGE_TTL_MS = 60 * 60 * 1000;
+const ACTIVITY_REVIEW_SYSTEM_MESSAGE_SOURCE = "activity_review";
+const ACTIVITY_REVIEW_SYSTEM_MESSAGE_TTL_MS = 60 * 60 * 1000;
 const CONTACT_GAP_MODULE = "contactGapFloor";
 const RANDOM_PULSE_MODULE = "scheduled_pulse";
 const PULSE_MEMORY_SEEDS_MODULE = "pulse_memory_seeds";
@@ -22,11 +26,14 @@ const PULSE_MEMORY_SEED_COUNT = 2;
 const PULSE_MEMORY_SEED_HISTORY_WINDOW = 10;
 const CONTACT_GAP_POLL_INTERVAL_MS = 60_000;
 const DEFAULT_REMINDER_BLOCK_WINDOW_MS = 15 * 60_000;
+const MAX_ACTIVITY_REVIEW_BATCH = 6;
 
 async function runSystemCheckinPoller(config) {
   const account = resolveSelectedAccount(config);
   const queue = new SystemMessageQueueStore({ filePath: config.systemMessageQueueFile });
   const agentMemory = new AgentMemoryService({ config });
+  const activityService = new ActivityService({ config });
+  const habitService = new HabitService(buildHabitServiceOptions(config));
   const obsidian = new ObsidianService({ config });
   const pulseConfigStore = new PulseConfigStore({ filePath: config.pulseConfigFile });
   const sessionStore = new SessionStore({ filePath: config.sessionsFile });
@@ -76,8 +83,41 @@ async function runSystemCheckinPoller(config) {
       maxAgeMs: RANDOM_PULSE_SYSTEM_MESSAGE_TTL_MS,
       nowMs,
     });
+    queue.pruneStaleForAccount(account.accountId, {
+      source: ACTIVITY_REVIEW_SYSTEM_MESSAGE_SOURCE,
+      maxAgeMs: ACTIVITY_REVIEW_SYSTEM_MESSAGE_TTL_MS,
+      nowMs,
+    });
 
-    if (queue.hasPendingForAccount(account.accountId)) {
+    const dueActivities = activityService.listDueReviews(nowMs, { limit: MAX_ACTIVITY_REVIEW_BATCH }).activities;
+    const reviewCandidates = dueActivities.filter((activity) => {
+      const activityId = normalizeText(activity?.id);
+      return activityId && !queue.hasPendingForAccount(account.accountId, {
+        source: ACTIVITY_REVIEW_SYSTEM_MESSAGE_SOURCE,
+        activityId,
+      });
+    });
+    if (reviewCandidates.length) {
+      const habitSummary = loadOpenHabitSummary(habitService);
+      for (const activity of reviewCandidates) {
+        rearmActivityReview(activityService, activity, nowMs);
+        const queued = queue.enqueue({
+          id: crypto.randomUUID(),
+          accountId: account.accountId,
+          senderId: target.senderId,
+          workspaceRoot: target.workspaceRoot,
+          activityId: activity.id,
+          text: buildActivityReviewTrigger(config, {
+            activities: [activity],
+            habitSummary,
+          }),
+          kind: "pulse",
+          source: ACTIVITY_REVIEW_SYSTEM_MESSAGE_SOURCE,
+          createdAt: new Date(nowMs).toISOString(),
+          expiresAt: new Date(nowMs + ACTIVITY_REVIEW_SYSTEM_MESSAGE_TTL_MS).toISOString(),
+        });
+        console.log(`[cyberboss] activity review queued id=${queued.id} activityId=${activity.id}`);
+      }
       await sleep(CONTACT_GAP_POLL_INTERVAL_MS);
       continue;
     }
@@ -89,7 +129,12 @@ async function runSystemCheckinPoller(config) {
     const gapMinutes = Number.isFinite(lastBotOutboundAtMs)
       ? Math.floor(Math.max(0, nowMs - lastBotOutboundAtMs) / 60000)
       : Infinity;
-    if (!quietHoursActive && !reminderDueSoon && gapMinutes >= contactGapMinutes) {
+    if (
+      !quietHoursActive
+      && !reminderDueSoon
+      && gapMinutes >= contactGapMinutes
+      && !queue.hasPendingForAccount(account.accountId, { source: CHECKIN_SYSTEM_MESSAGE_SOURCE })
+    ) {
       const queued = queue.enqueue({
         id: crypto.randomUUID(),
         accountId: account.accountId,
@@ -115,7 +160,14 @@ async function runSystemCheckinPoller(config) {
       console.log(`[cyberboss] scheduled pulse armed in ${Math.round(delayMs / 60000)}m at ${formatLocalTime(dueAtMs)}`);
     }
 
-    if (!quietHoursActive && !reminderDueSoon && Number.isFinite(pendingPulseDueAtMs) && pendingPulseDueAtMs > 0 && pendingPulseDueAtMs <= nowMs) {
+    if (
+      !quietHoursActive
+      && !reminderDueSoon
+      && Number.isFinite(pendingPulseDueAtMs)
+      && pendingPulseDueAtMs > 0
+      && pendingPulseDueAtMs <= nowMs
+      && !queue.hasPendingForAccount(account.accountId, { source: RANDOM_PULSE_SYSTEM_MESSAGE_SOURCE })
+    ) {
       runtimeContextStore.setPulseExposureModule(target.workspaceRoot, RANDOM_PULSE_MODULE, {
         pendingPulseDueAt: "",
         lastPulseTriggeredAt: new Date(nowMs).toISOString(),
@@ -256,6 +308,43 @@ function buildPulseTrigger(config, { obsidianExcerpt = null, memorySeeds = [] } 
   return lines.join("\n").trim();
 }
 
+function buildActivityReviewTrigger(config, { activities = [], habitSummary = null } = {}) {
+  const userName = normalizeText(config?.userName) || "the user";
+  const normalizedActivities = Array.isArray(activities)
+    ? activities.map(normalizeReviewActivity).filter(Boolean)
+    : [];
+  const lines = [
+    `A scheduled activity review fired for ${userName}. You must send one short natural message to the user now.`,
+    "This is a hard activity-review turn, not a private planning pass. Do not return silent.",
+    "Do not mark activity items done, dropped, or abandoned unless the user explicitly said so in actual chat context.",
+  ];
+  if (normalizedActivities.length) {
+    lines.push("", "Due activities:");
+    for (const activity of normalizedActivities) {
+      lines.push(`- ${activity.title}`);
+      if (activity.openItems.length) {
+        lines.push(`  Open items: ${activity.openItems.join("; ")}`);
+      }
+      if (activity.doneCount || activity.droppedCount) {
+        lines.push(`  Progress: ${activity.doneCount} done, ${activity.droppedCount} dropped`);
+      }
+    }
+  }
+  if (habitSummary?.lines?.length) {
+    lines.push(
+      "",
+      "Today's unfinished habits overview:",
+      ...habitSummary.lines.map((line) => `- ${line}`),
+      "Use this only as supporting context. Do not ignore the due activities above."
+    );
+  }
+  lines.push(
+    "",
+    "Your job in this turn is simply to send one grounded message that checks in on the live activity thread."
+  );
+  return lines.join("\n").trim();
+}
+
 function pickPulseMemorySeeds({
   agentMemory,
   runtimeContextStore,
@@ -289,6 +378,66 @@ function pickPulseMemorySeeds({
   }
   recordPulseShownSeedIds(runtimeContextStore, workspaceRoot, picked.map((item) => item.id));
   return picked;
+}
+
+function rearmActivityReview(activityService, activity, nowMs) {
+  const reviewedAt = new Date(nowMs).toISOString();
+  const minMinutes = normalizePositiveInteger(activity?.reviewMinMinutes, 120);
+  const maxMinutes = Math.max(minMinutes, normalizePositiveInteger(activity?.reviewMaxMinutes, 360));
+  const nextReviewAt = new Date(nowMs + pickRandomDelayMs(minMinutes * 60_000, maxMinutes * 60_000)).toISOString();
+  activityService.updateActivityReview({
+    id: activity.id,
+    lastReviewedAt: reviewedAt,
+    nextReviewAt,
+    reviewMinMinutes: minMinutes,
+    reviewMaxMinutes: maxMinutes,
+  });
+}
+
+function loadOpenHabitSummary(habitService) {
+  try {
+    const status = habitService?.statusToday?.({}) || {};
+    const habits = Array.isArray(status?.habits) ? status.habits : [];
+    const lines = habits
+      .filter((entry) => entry?.habit?.status === "active")
+      .filter((entry) => entry?.dailyState !== "done" && entry?.dailyState !== "abandoned")
+      .map((entry) => {
+        const title = normalizeText(entry?.habit?.title);
+        const note = normalizeText(entry?.habit?.notes) || normalizeText(entry?.lastEvent?.note);
+        return note ? `${title} - ${note}` : title;
+      })
+      .filter(Boolean);
+    return {
+      count: lines.length,
+      lines,
+    };
+  } catch {
+    return { count: 0, lines: [] };
+  }
+}
+
+function normalizeReviewActivity(activity) {
+  if (!activity || typeof activity !== "object") {
+    return null;
+  }
+  const title = normalizeText(activity.title);
+  if (!title) {
+    return null;
+  }
+  const items = Array.isArray(activity.items) ? activity.items : [];
+  const openItems = items
+    .filter((item) => normalizeText(item?.status).toLowerCase() === "open")
+    .map((item) => normalizeText(item?.text))
+    .filter(Boolean)
+    .slice(0, 5);
+  const doneCount = items.filter((item) => normalizeText(item?.status).toLowerCase() === "done").length;
+  const droppedCount = items.filter((item) => normalizeText(item?.status).toLowerCase() === "dropped").length;
+  return {
+    title,
+    openItems,
+    doneCount,
+    droppedCount,
+  };
 }
 
 function normalizePulseMemorySeed(memory) {
@@ -393,9 +542,25 @@ function parseHourMinute(value) {
   return hour * 60 + minute;
 }
 
+function buildHabitServiceOptions(config) {
+  return {
+    definitionsFile: config.habitDefinitionsFile,
+    eventsFile: config.habitEventsFile,
+    stateFile: config.habitStateFile,
+    heatmapFile: config.habitHeatmapFile,
+    dayResetHour: config.habitDayResetHour,
+  };
+}
+
+function normalizePositiveInteger(value, fallback) {
+  const parsed = Number.parseInt(String(value || ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 module.exports = {
   runSystemCheckinPoller,
   buildCheckinTrigger,
   buildPulseTrigger,
+  buildActivityReviewTrigger,
   pickPulseMemorySeeds,
 };

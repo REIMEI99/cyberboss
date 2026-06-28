@@ -67,10 +67,27 @@ class SystemMessageQueueStore {
     return drained;
   }
 
-  hasPendingForAccount(accountId) {
+  hasPendingForAccount(accountId, { source = "", kind = "", activityId = "" } = {}) {
     this.load();
     const normalizedAccountId = normalizeText(accountId);
-    return this.state.messages.some((message) => message.accountId === normalizedAccountId);
+    const normalizedSource = normalizeText(source);
+    const normalizedKind = normalizeText(kind);
+    const normalizedActivityId = normalizeText(activityId);
+    return this.state.messages.some((message) => {
+      if (message.accountId !== normalizedAccountId) {
+        return false;
+      }
+      if (normalizedSource && message.source !== normalizedSource) {
+        return false;
+      }
+      if (normalizedKind && message.kind !== normalizedKind) {
+        return false;
+      }
+      if (normalizedActivityId && message.activityId !== normalizedActivityId) {
+        return false;
+      }
+      return true;
+    });
   }
 
   pruneStaleForAccount(accountId, { source = "", legacyText = "", maxAgeMs = 0, nowMs = Date.now() } = {}) {
@@ -120,6 +137,7 @@ function normalizeSystemMessage(message) {
   const source = normalizeText(message.source);
   const kind = normalizeText(message.kind);
   const expiresAt = normalizeIsoTime(message.expiresAt);
+  const activityId = normalizeText(message.activityId);
 
   if (!id || !accountId || !senderId || !workspaceRoot || !text) {
     return null;
@@ -141,6 +159,9 @@ function normalizeSystemMessage(message) {
   }
   if (expiresAt) {
     normalized.expiresAt = expiresAt;
+  }
+  if (activityId) {
+    normalized.activityId = activityId;
   }
   return normalized;
 }

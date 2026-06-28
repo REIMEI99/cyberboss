@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const {
   buildCheckinTrigger,
   buildPulseTrigger,
+  buildActivityReviewTrigger,
   pickPulseMemorySeeds,
 } = require("../src/app/system-checkin-poller");
 
@@ -78,4 +79,34 @@ test("pickPulseMemorySeeds prefers unseen wishseeds and records exposure", () =>
       shownRounds: [["wish-old"], ["concern-old"], ["wish-new", "concern-new"]],
     },
   });
+});
+
+test("buildActivityReviewTrigger includes due activities and unfinished habit overview", () => {
+  const trigger = buildActivityReviewTrigger(
+    { userName: "Tester" },
+    {
+      activities: [
+        {
+          title: "Finish planning doc",
+          items: [
+            { text: "write scheduler section", status: "open" },
+            { text: "close open questions", status: "done" },
+          ],
+        },
+      ],
+      habitSummary: {
+        lines: [
+          "Stretch - after lunch",
+          "Read - 20 min before sleep",
+        ],
+      },
+    }
+  );
+
+  assert.match(trigger, /scheduled activity review fired/i);
+  assert.match(trigger, /Do not return silent/i);
+  assert.match(trigger, /Finish planning doc/);
+  assert.match(trigger, /write scheduler section/);
+  assert.match(trigger, /Today's unfinished habits overview:/);
+  assert.match(trigger, /Stretch - after lunch/);
 });

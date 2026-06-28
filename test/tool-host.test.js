@@ -156,19 +156,105 @@ function createHost({ services: serviceOverrides = {}, runtimeContextStore = und
       },
       activity: {
         add(args) {
-          return { id: "act-1", title: args.title, reminderId: args.reminderId || "rem-1", createdAt: "2026-06-22T00:00:00.000Z" };
+          return {
+            id: "act-1",
+            title: args.title,
+            status: "open",
+            items: (args.items || []).map((text, index) => ({
+              id: `item-${index + 1}`,
+              text,
+              status: "open",
+              updatedAt: "2026-06-22T00:00:00.000Z",
+              doneAt: "",
+            })),
+            reminderId: args.reminderId || "",
+            nextReviewAt: args.nextReviewAt || "",
+            reviewMinMinutes: args.reviewMinMinutes || 120,
+            reviewMaxMinutes: args.reviewMaxMinutes || 360,
+            createdAt: "2026-06-22T00:00:00.000Z",
+            updatedAt: "2026-06-22T00:00:00.000Z",
+          };
+        },
+        addItem(args) {
+          return {
+            id: args.id,
+            title: "test-activity",
+            status: "open",
+            items: [
+              { id: "item-1", text: "first", status: "open", updatedAt: "2026-06-22T00:00:00.000Z", doneAt: "" },
+              { id: "item-2", text: args.text, status: "open", updatedAt: "2026-06-22T00:00:00.000Z", doneAt: "" },
+            ],
+            createdAt: "2026-06-22T00:00:00.000Z",
+            updatedAt: "2026-06-22T00:00:00.000Z",
+          };
+        },
+        markItemDone(args) {
+          return {
+            id: args.id,
+            title: "test-activity",
+            status: "open",
+            items: [
+              { id: args.itemId, text: "first", status: "done", updatedAt: "2026-06-22T00:00:00.000Z", doneAt: "2026-06-22T00:00:00.000Z" },
+            ],
+            createdAt: "2026-06-22T00:00:00.000Z",
+            updatedAt: "2026-06-22T00:00:00.000Z",
+          };
+        },
+        markItemDropped(args) {
+          return {
+            id: args.id,
+            title: "test-activity",
+            status: "open",
+            items: [
+              { id: args.itemId, text: "first", status: "dropped", updatedAt: "2026-06-22T00:00:00.000Z", doneAt: "" },
+            ],
+            createdAt: "2026-06-22T00:00:00.000Z",
+            updatedAt: "2026-06-22T00:00:00.000Z",
+          };
         },
         complete(args) {
-          return { id: args.id, title: "test-activity", reminderId: "rem-1", createdAt: "2026-06-22T00:00:00.000Z", completedAt: "2026-06-22T00:02:00.000Z", remainingOpenCount: 0 };
+          return { id: args.id, title: "test-activity", status: "done", reminderId: "rem-1", items: [], createdAt: "2026-06-22T00:00:00.000Z", completedAt: "2026-06-22T00:02:00.000Z", updatedAt: "2026-06-22T00:02:00.000Z", remainingOpenCount: 0 };
         },
         drop(args) {
-          return { id: args.id, title: "test-activity", reminderId: "rem-1", createdAt: "2026-06-22T00:00:00.000Z", remainingOpenCount: 0 };
+          return { id: args.id, title: "test-activity", status: "archived", reminderId: "rem-1", items: [], createdAt: "2026-06-22T00:00:00.000Z", updatedAt: "2026-06-22T00:02:00.000Z", remainingOpenCount: 0 };
         },
         list(args) {
-          return { count: 1, activities: [{ id: "act-1", title: "test-activity", reminderId: "rem-1", createdAt: new Date().toISOString() }] };
+          return {
+            count: 1,
+            activities: [{
+              id: "act-1",
+              title: "test-activity",
+              status: "open",
+              reminderId: "",
+              items: [{ id: "item-1", text: "first", status: "open", updatedAt: new Date().toISOString(), doneAt: "" }],
+              nextReviewAt: "2026-06-28T12:00:00.000Z",
+              createdAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            }],
+          };
         },
         listDone(args) {
           return { count: 0, activities: [] };
+        },
+        getById(id) {
+          return {
+            id,
+            title: "test-activity",
+            status: "open",
+            items: [{ id: "item-1", text: "first", status: "open", updatedAt: new Date().toISOString(), doneAt: "" }],
+            nextReviewAt: "2026-06-28T12:00:00.000Z",
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString(),
+          };
+        },
+        listOpenItems(activity) {
+          return (activity.items || []).filter((item) => item.status === "open");
+        },
+        listRecentlyDoneItems() {
+          return [];
+        },
+        countDoneItems(activity) {
+          return (activity.items || []).filter((item) => item.status === "done").length;
         },
         allIds() {
           return ["act-1"];
@@ -460,7 +546,14 @@ test("tool host exposes activity tools", async () => {
   const host = createHost();
   const addResult = await host.invokeTool("cyberboss_activity_add", {
     title: "test-activity",
-    checkBackMinutes: 15,
+  }, {});
+  const itemDoneResult = await host.invokeTool("cyberboss_activity_item_mark_done", {
+    id: "act-1",
+    itemId: "item-1",
+  }, {});
+  const itemDroppedResult = await host.invokeTool("cyberboss_activity_item_mark_dropped", {
+    id: "act-1",
+    itemId: "item-1",
   }, {});
   const listResult = await host.invokeTool("cyberboss_activity_list", {}, {});
   const completeResult = await host.invokeTool("cyberboss_activity_complete", {
@@ -472,6 +565,8 @@ test("tool host exposes activity tools", async () => {
   const doneResult = await host.invokeTool("cyberboss_activity_list_done", {}, {});
 
   assert.equal(addResult.text, "Activity added: test-activity");
+  assert.equal(itemDoneResult.text, "Activity item completed: test-activity");
+  assert.equal(itemDroppedResult.text, "Activity item dropped: test-activity");
   assert.equal(listResult.text, "Activities loaded: 1.");
   assert.equal(completeResult.text, "Activity completed: test-activity");
   assert.equal(dropResult.text, "Activity dropped: test-activity");

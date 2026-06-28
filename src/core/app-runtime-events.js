@@ -175,7 +175,12 @@ function buildOpenActivityDigest(app) {
   }
   const lines = activities.map((a) => {
     const ageMin = Math.max(0, Math.floor((Date.now() - (Date.parse(a.createdAt) || Date.now())) / 60000));
-    const items = Array.isArray(a.items) && a.items.length ? ` [items: ${a.items.join("; ")}]` : "";
+    const itemTexts = Array.isArray(a.items)
+      ? a.items
+        .map((item) => (typeof item === "string" ? item : String(item?.text || "").trim()))
+        .filter(Boolean)
+      : [];
+    const items = itemTexts.length ? ` [items: ${itemTexts.join("; ")}]` : "";
     return `- ${a.title}${items} (open ${ageMin}m)`;
   });
   return `Open activities:\n${lines.join("\n")}`;
@@ -228,7 +233,7 @@ async function maybeQueuePostTurnAudit(app, audit) {
       "No new activity or reminder was created during that turn.",
       "Re-evaluate whether this user message describes something the user will do or is doing right now.",
       "Hard rule: saying they will do something does NOT mean they already did it. 'Will do / about to do / going to' is an OPEN activity, not a completed one. Only mark done when the user confirms the action is finished.",
-      "If the user described a near-term action (will do or doing), add it now with cyberboss_activity_add so the intention is not lost. The activity auto-binds a check-back reminder.",
+      "If the user described a near-term action (will do or doing), add it now with cyberboss_activity_add so the intention is not lost. Put the follow-up cadence on the activity itself; use a separate reminder only when there is a real hard due time.",
       "If several tasks form one work sequence, pass them as items, or use cyberboss_activity_add_item on an existing open activity rather than spawning a separate activity.",
       "If the user expressed a long-term wish with no near-term plan, store it as memory type=wishseed instead of an activity.",
       "If the matter was already explicitly resolved in this turn, or another mechanism clearly captured it, return silent.",

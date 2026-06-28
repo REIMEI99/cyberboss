@@ -51,6 +51,8 @@ The runtime can be `codex` or `claudecode`, but the documented command surface s
 
 - `model.inspect`
 - `model.select`
+- `activity.inspect`
+- `reminder.inspect`
 - `channel.send_file`
 - `timeline.write`
 - `reminder.create`
@@ -109,6 +111,12 @@ Notes:
 - `/pulse <min>-<max>`
   Adjust the host-side scheduled life-pulse range for the current project.
 - `/chunk <number>`
+- `/activity`
+  Inspect current activities for the bound workspace/chat.
+- `/activity items`
+  Inspect current activities with each open item expanded.
+- `/reminder`
+  Inspect current hard reminders for the bound workspace/chat.
 - `/yes`
 - `/always`
 - `/no`
@@ -127,3 +135,5 @@ Notes:
 - `pulse` remains the model-facing soft-trigger semantic term for non-reminder internal turns
 - when unset, `/checkin` falls back to `CYBERBOSS_CHECKIN_MIN_INTERVAL_MS` / `CYBERBOSS_CHECKIN_MAX_INTERVAL_MS`, then to `5-15` minutes
 - when unset, `/pulse` falls back to `CYBERBOSS_PULSE_MIN_INTERVAL_MS` / `CYBERBOSS_PULSE_MAX_INTERVAL_MS`, then to `180-360` minutes
+- `/activity` is read-only in phase 1 and shows activity threads rather than creating reminders
+- `/reminder` is read-only in phase 1 and shows active hard reminders only

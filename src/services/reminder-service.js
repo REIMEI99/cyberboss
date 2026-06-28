@@ -100,6 +100,15 @@ class ReminderService {
     };
   }
 
+  getById({ id = "", userId = "" } = {}, context = {}) {
+    const reminderId = normalizeText(id);
+    if (!reminderId) {
+      throw new Error("Reminder getById requires id.");
+    }
+    const result = this.list({ userId, limit: 500 }, context);
+    return result.reminders.find((reminder) => reminder.id === reminderId) || null;
+  }
+
   complete({ id = "" } = {}) {
     const reminderId = normalizeText(id);
     if (!reminderId) {
@@ -164,9 +173,9 @@ function resolveFollowupDelayMinutes({
     return clampFollowupDelayMinutes(Math.round(parsedDelayMs / 60_000));
   }
   if (parseAbsoluteTime(dueAt) > 0) {
-    return 30;
+    return 10;
   }
-  return 15;
+  return 10;
 }
 
 function parseDelayMinutes(rawValue) {
@@ -260,7 +269,7 @@ function normalizeLimit(value) {
 function clampFollowupDelayMinutes(value) {
   const parsed = Number.parseInt(String(value || ""), 10);
   if (!Number.isFinite(parsed) || parsed <= 0) {
-    return 15;
+    return 10;
   }
   return Math.max(5, Math.min(parsed, 1440));
 }

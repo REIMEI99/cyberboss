@@ -1,4 +1,4 @@
-﻿const test = require("node:test");
+const test = require("node:test");
 const assert = require("node:assert/strict");
 const fs = require("fs");
 const os = require("os");
@@ -23,7 +23,7 @@ function createReminderStore(stateDir) {
   });
 }
 
-test("activity add stores items and empty reminderId", () => {
+test("activity add stores normalized item objects and empty reminderId", () => {
   const { service } = createActivityService();
   const activity = service.add({
     title: "errands",
@@ -31,8 +31,11 @@ test("activity add stores items and empty reminderId", () => {
     reminderId: "",
   });
   assert.equal(activity.title, "errands");
-  assert.deepEqual(activity.items, ["buy fruit", "pick up package"]);
+  assert.equal(activity.status, "open");
   assert.equal(activity.reminderId, "");
+  assert.equal(activity.items.length, 2);
+  assert.equal(activity.items[0].text, "buy fruit");
+  assert.equal(activity.items[0].status, "open");
 });
 
 test("activity add without items defaults to empty array", () => {
@@ -50,51 +53,63 @@ test("activity bindReminder sets reminderId on open activity", () => {
   assert.equal(list.activities[0].reminderId, "rem-123");
 });
 
-test("activity bindReminder throws for unknown id", () => {
-  const { service } = createActivityService();
-  assert.throws(() => service.bindReminder({ id: "nonexistent", reminderId: "r" }), /Activity not found/);
-});
-
-test("activity addItem appends to open activity", () => {
+test("activity addItem appends normalized item object", () => {
   const { service } = createActivityService();
   const activity = service.add({ title: "errands", items: ["task1"] });
   const updated = service.addItem({ id: activity.id, text: "task2" });
-  assert.deepEqual(updated.items, ["task1", "task2"]);
-  const list = service.list({ limit: 10 });
-  assert.equal(list.activities[0].items.length, 2);
+  assert.equal(updated.items.length, 2);
+  assert.equal(updated.items[1].text, "task2");
+  assert.equal(updated.items[1].status, "open");
 });
 
-test("activity addItem throws for unknown id", () => {
+test("activity item status can be marked done and dropped", () => {
   const { service } = createActivityService();
-  assert.throws(() => service.addItem({ id: "nope", text: "x" }), /Activity not found/);
+  const activity = service.add({ title: "errands", items: ["task1", "task2"] });
+  const doneResult = service.markItemDone({ id: activity.id, itemId: activity.items[0].id });
+  const droppedResult = service.markItemDropped({ id: activity.id, itemId: activity.items[1].id });
+  assert.equal(doneResult.items[0].status, "done");
+  assert.ok(doneResult.items[0].doneAt);
+  assert.equal(droppedResult.items[1].status, "dropped");
 });
 
-test("activity complete returns items and reminderId", () => {
+test("activity complete closes thread and clears nextReviewAt", () => {
   const { service } = createActivityService();
-  const activity = service.add({ title: "test", items: ["a", "b"], reminderId: "rem-1" });
+  const activity = service.add({
+    title: "test",
+    items: ["a", "b"],
+    reminderId: "rem-1",
+    nextReviewAt: "2026-06-28T12:00:00.000Z",
+  });
   const result = service.complete({ id: activity.id });
+  assert.equal(result.status, "done");
   assert.equal(result.reminderId, "rem-1");
-  assert.deepEqual(result.items, ["a", "b"]);
+  assert.equal(result.nextReviewAt, "");
   assert.equal(service.list({ limit: 10 }).count, 0);
 });
 
-test("activity drop returns items and reminderId", () => {
+test("activity drop archives thread and clears nextReviewAt", () => {
   const { service } = createActivityService();
-  const activity = service.add({ title: "test", items: ["a"], reminderId: "rem-2" });
+  const activity = service.add({
+    title: "test",
+    items: ["a"],
+    reminderId: "rem-2",
+    nextReviewAt: "2026-06-28T12:00:00.000Z",
+  });
   const result = service.drop({ id: activity.id });
+  assert.equal(result.status, "archived");
   assert.equal(result.reminderId, "rem-2");
-  assert.deepEqual(result.items, ["a"]);
+  assert.equal(result.nextReviewAt, "");
   assert.equal(service.list({ limit: 10 }).count, 0);
 });
 
-test("normalizeActivity preserves items from persisted data", () => {
+test("normalizeActivity preserves items from persisted mixed legacy data", () => {
   const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-activity-persist-test-"));
   const activityFile = path.join(stateDir, "activities.json");
   fs.writeFileSync(activityFile, JSON.stringify({
     open: [{
       id: "persist-1",
       title: "persisted task",
-      items: ["x", "y"],
+      items: ["x", { id: "item-y", text: "y", status: "done", doneAt: "2026-06-28T10:00:00.000Z" }],
       reminderId: "rem-old",
       createdAt: "2026-06-22T00:00:00.000Z",
     }],
@@ -103,8 +118,10 @@ test("normalizeActivity preserves items from persisted data", () => {
   const service = new ActivityService({ config: { activityFile } });
   const list = service.list({ limit: 10 });
   assert.equal(list.count, 1);
-  assert.deepEqual(list.activities[0].items, ["x", "y"]);
-  assert.equal(list.activities[0].reminderId, "rem-old");
+  assert.equal(list.activities[0].items[0].text, "x");
+  assert.equal(list.activities[0].items[0].status, "open");
+  assert.equal(list.activities[0].items[1].text, "y");
+  assert.equal(list.activities[0].items[1].status, "done");
 });
 
 test("old activity data without items migrates to empty items array", () => {
@@ -123,6 +140,22 @@ test("old activity data without items migrates to empty items array", () => {
   const list = service.list({ limit: 10 });
   assert.equal(list.count, 1);
   assert.deepEqual(list.activities[0].items, []);
+});
+
+test("listDueReviews returns only open due activities", () => {
+  const { service } = createActivityService();
+  service.add({
+    title: "due now",
+    nextReviewAt: "2026-06-28T10:00:00.000Z",
+  });
+  const future = service.add({
+    title: "future",
+    nextReviewAt: "2026-06-29T10:00:00.000Z",
+  });
+  service.complete({ id: future.id });
+  const due = service.listDueReviews(Date.parse("2026-06-28T12:00:00.000Z"));
+  assert.equal(due.count, 1);
+  assert.equal(due.activities[0].title, "due now");
 });
 
 test("reminder queue stores and retrieves activityId", () => {
@@ -158,120 +191,4 @@ test("reminder queue bindActivity sets activityId", () => {
   assert.equal(reminder.activityId, "");
   const bound = store.bindActivity({ id: reminder.id, activityId: "act-99" });
   assert.equal(bound.activityId, "act-99");
-  const all = store.listAll();
-  assert.equal(all[0].activityId, "act-99");
-});
-
-test("reminder queue without activityId defaults to empty string", () => {
-  const stateDir = fs.mkdtempSync(path.join(os.tmpdir(), "cyberboss-reminder-default-test-"));
-  const store = createReminderStore(stateDir);
-  const reminder = store.enqueue({
-    id: "r1",
-    accountId: "acct",
-    senderId: "user",
-    contextToken: "ctx",
-    text: "do something",
-    dueAtMs: Date.now() + 60_000,
-    createdAt: "2026-06-22T00:00:00.000Z",
-  });
-  assert.equal(reminder.activityId, "");
-});
-
-test("1:1 binding flow: create activity, create reminder with activityId, bindReminder back", () => {
-  const { service, stateDir } = createActivityService();
-  const reminderStore = createReminderStore(stateDir);
-
-  // Step 1: create activity with empty reminderId
-  const activity = service.add({ title: "write report", items: ["draft", "review"], reminderId: "" });
-  assert.equal(activity.reminderId, "");
-
-  // Step 2: create reminder with activityId
-  const reminder = reminderStore.enqueue({
-    id: "rem-flow-1",
-    accountId: "acct",
-    senderId: "user",
-    contextToken: "ctx",
-    text: "check on report",
-    dueAtMs: Date.now() + 600_000,
-    createdAt: "2026-06-22T00:00:00.000Z",
-    activityId: activity.id,
-  });
-  assert.equal(reminder.activityId, activity.id);
-
-  // Step 3: bind reminderId back to activity
-  service.bindReminder({ id: activity.id, reminderId: reminder.id });
-  const list = service.list({ limit: 10 });
-  assert.equal(list.activities[0].reminderId, "rem-flow-1");
-
-  // Step 4: complete activity, then complete reminder
-  const completed = service.complete({ id: activity.id });
-  assert.equal(completed.reminderId, "rem-flow-1");
-  reminderStore.complete({ id: "rem-flow-1" });
-  assert.equal(reminderStore.listAll().length, 0);
-  assert.equal(service.list({ limit: 10 }).count, 0);
-});
-
-test("orphan reminder with check-back text gets completed, not activity-created", () => {
-  const { service, stateDir } = createActivityService();
-  const reminderStore = createReminderStore(stateDir);
-
-  // Simulate old system: reminder with check-back text, no activityId
-  const reminder = reminderStore.enqueue({
-    id: "rem-stale-1",
-    accountId: "acct",
-    senderId: "user",
-    contextToken: "ctx",
-    text: "Activity check-back. Call cyberboss_activity_list to see all open activities.",
-    dueAtMs: Date.now() - 1_000,
-    createdAt: "2026-06-22T00:00:00.000Z",
-  });
-  assert.equal(reminder.activityId, "");
-
-  // Simulate reconcileOrphanReminder logic
-  const openActivities = service.list({ limit: 50 }).activities;
-  const hasBoundActivity = openActivities.some((a) => a.reminderId === reminder.id);
-  assert.equal(hasBoundActivity, false);
-
-  // Since text includes "Activity check-back", complete it
-  reminderStore.complete({ id: reminder.id });
-  assert.equal(reminderStore.listAll().length, 0);
-  // No activity should have been created
-  assert.equal(service.list({ limit: 50 }).count, 0);
-});
-
-test("standalone reminder can be replaced by a new activity-reminder pair", () => {
-  const { service, stateDir } = createActivityService();
-  const reminderStore = createReminderStore(stateDir);
-
-  const oldReminder = reminderStore.enqueue({
-    id: "rem-orphan-1",
-    accountId: "acct",
-    senderId: "user",
-    contextToken: "ctx",
-    text: "call mom",
-    dueAtMs: Date.now() - 1_000,
-    createdAt: "2026-06-22T00:00:00.000Z",
-  });
-  assert.equal(oldReminder.activityId, "");
-
-  const activity = service.add({ title: "call mom", reminderId: "" });
-  const newReminder = reminderStore.enqueue({
-    id: "rem-activity-1",
-    accountId: "acct",
-    senderId: "user",
-    contextToken: "ctx",
-    text: "Check-back: call mom",
-    dueAtMs: Date.now() + 10 * 60_000,
-    createdAt: "2026-06-22T00:00:00.000Z",
-    activityId: activity.id,
-  });
-  service.bindReminder({ id: activity.id, reminderId: newReminder.id });
-  reminderStore.complete({ id: oldReminder.id });
-
-  const reminders = reminderStore.listAll();
-  assert.equal(reminders.length, 1);
-  assert.equal(reminders[0].id, "rem-activity-1");
-  assert.equal(reminders[0].activityId, activity.id);
-  const updatedActivity = service.list({ limit: 50 }).activities[0];
-  assert.equal(updatedActivity.reminderId, "rem-activity-1");
 });

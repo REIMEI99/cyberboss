@@ -901,7 +901,9 @@ function createSystemReplyPolicyForTarget(runtimeId, { systemKind = "", systemSo
   const normalizedSystemSource = normalizeSystemReplySourceName(systemSource);
   const isMandatoryReachout = normalizedSystemKind === "reminder"
     || normalizedSystemKind === "checkin"
-    || normalizedSystemSource === "random_pulse";
+    || normalizedSystemSource === "random_pulse"
+    || normalizedSystemSource === "activity_review"
+    || normalizedSystemSource === "hard_reminder";
   /*
    * System/check-in turns are intentionally stricter than normal WeChat replies.
    * The stable protocol is one JSON action object: {"action":"silent"} or
@@ -944,6 +946,12 @@ function normalizeSystemReplySourceName(value) {
 function buildMandatorySystemFallbackMessage(systemKind, systemSource = "") {
   const normalizedKind = normalizeSystemReplyKind(systemKind);
   const normalizedSource = normalizeSystemReplySourceName(systemSource);
+  if (normalizedSource === "activity_review") {
+    return "刚想到你手头那件事，过来确认一下，你现在还在推进吗？";
+  }
+  if (normalizedSource === "hard_reminder") {
+    return "来提醒你一下，刚才那件事现在怎么样了？如果已经弄完了也可以直接跟我说。";
+  }
   if (normalizedKind === "reminder") {
     return "来提醒你一下，刚才那件事现在怎么样了？如果已经弄完了也可以直接跟我说。";
   }
